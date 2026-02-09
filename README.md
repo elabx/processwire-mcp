@@ -138,7 +138,7 @@ Third-party ProcessWire modules can register custom MCP tools by extending `Proc
 namespace YourVendor\YourModule;
 
 use Elabx\ProcessWireMcp\Tool\ProcessWireMcpTool;
-use Mcp\Attribute\McpTool;
+use Mcp\Capability\Attribute\McpTool;
 
 class MyCustomTools extends ProcessWireMcpTool
 {
@@ -241,6 +241,91 @@ Install the optional `ProcessWireMcp` module for:
 - Hook support for third-party extensions
 
 Copy `ProcessWireMcp.module.php` to `site/modules/ProcessWireMcp/` and install via ProcessWire admin.
+
+## Testing
+
+Tests run inside DDEV against a live ProcessWire installation. This is required because the tools interact directly with ProcessWire APIs and the database.
+
+### Prerequisites
+
+- A working DDEV project with ProcessWire installed and a populated database
+- The package mounted into the DDEV container (e.g. via a docker-compose volume at `/packages/ProcessWireMcp`)
+- The package installed as a Composer dependency so its classes are autoloaded
+- PHPUnit available in the project's vendor (e.g. `phpunit/phpunit` in `require-dev`)
+- The test namespace registered in your project's `autoload-dev`:
+
+```json
+{
+  "autoload-dev": {
+    "psr-4": {
+      "Elabx\\ProcessWireMcp\\Tests\\": "/packages/ProcessWireMcp/tests/"
+    }
+  }
+}
+```
+
+After changing autoload config, regenerate the autoloader:
+
+```bash
+ddev composer dump-autoload
+```
+
+### Running Tests
+
+```bash
+ddev exec vendor/bin/phpunit --configuration /packages/ProcessWireMcp/phpunit.xml
+```
+
+With readable output:
+
+```bash
+ddev exec vendor/bin/phpunit --configuration /packages/ProcessWireMcp/phpunit.xml --testdox
+```
+
+Run a specific test class:
+
+```bash
+ddev exec vendor/bin/phpunit --configuration /packages/ProcessWireMcp/phpunit.xml --filter PageTools
+```
+
+### How It Works
+
+The test bootstrap (`tests/bootstrap.php`) loads the host project's Composer autoloader at `/var/www/html/vendor/autoload.php`, then boots ProcessWire by including its `index.php`. This gives tests access to the full ProcessWire API with a real database connection — the same environment the MCP server runs in.
+
+`tests/ProcessWireTestCase.php` is the base class for all tests. It exposes `$this->wire()` which returns the bootstrapped `ProcessWire` instance.
+
+### Writing Tests
+
+Extend `ProcessWireTestCase` and instantiate tool classes directly:
+
+```php
+<?php
+
+namespace Elabx\ProcessWireMcp\Tests\Tool;
+
+use Elabx\ProcessWireMcp\Tests\ProcessWireTestCase;
+use Elabx\ProcessWireMcp\Tool\Core\PageTools;
+
+class PageToolsTest extends ProcessWireTestCase
+{
+    private PageTools $tools;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->tools = new PageTools();
+        $this->tools->setWire($this->wire());
+    }
+
+    public function testFindPagesReturnsResults(): void
+    {
+        $result = $this->tools->findPages('limit=3');
+
+        $this->assertTrue($result['success']);
+        $this->assertArrayHasKey('pages', $result['data']);
+    }
+}
+```
 
 ## License
 

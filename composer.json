@@ -19,6 +19,11 @@
             "Elabx\\ProcessWireMcp\\": "src/"
         }
     },
+    "autoload-dev": {
+        "psr-4": {
+            "Elabx\\ProcessWireMcp\\Tests\\": "tests/"
+        }
+    },
     "bin": ["bin/pw-mcp-server"],
     "config": {
         "sort-packages": true
