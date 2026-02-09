@@ -1,0 +1,27 @@
+{
+    "name": "elabx/processwire-mcp",
+    "description": "Extensible MCP Server for ProcessWire CMS",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["processwire", "mcp", "model-context-protocol", "ai", "claude"],
+    "authors": [
+        {
+            "name": "Elabx",
+            "email": "hello@yourcompany.com"
+        }
+    ],
+    "require": {
+        "php": ">=8.1",
+        "mcp/sdk": "^0.3"
+    },
+    "autoload": {
+        "psr-4": {
+            "Elabx\\ProcessWireMcp\\": "src/"
+        }
+    },
+    "bin": ["bin/pw-mcp-server"],
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable"
+}

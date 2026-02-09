@@ -1,0 +1,91 @@
+#!/usr/bin/env php
+<?php
+
+/**
+ * ProcessWire MCP Server Entry Point
+ *
+ * Usage:
+ *   php pw-mcp-server --pw-path=/path/to/processwire
+ *   PW_PATH=/path/to/processwire php pw-mcp-server
+ */
+
+declare(strict_types=1);
+
+// Find autoloader
+$autoloadPaths = [
+    __DIR__ . '/../vendor/autoload.php',           // Development (own vendor)
+    __DIR__ . '/../../../autoload.php',            // Installed as dependency (normal)
+    getcwd() . '/vendor/autoload.php',             // Installed as dependency (symlinked bin)
+];
+
+$autoloader = null;
+foreach ($autoloadPaths as $path) {
+    if (file_exists($path)) {
+        $autoloader = require $path;
+        break;
+    }
+}
+
+if ($autoloader === null) {
+    fwrite(STDERR, "Error: Could not find Composer autoloader.\n");
+    fwrite(STDERR, "Run 'composer install' first.\n");
+    exit(1);
+}
+
+use Elabx\ProcessWireMcp\Bootstrap\ProcessWireBootstrap;
+use Elabx\ProcessWireMcp\Server\ProcessWireMcpServer;
+
+// Parse command line arguments
+$options = getopt('', ['pw-path::', 'help']);
+
+if (isset($options['help'])) {
+    echo <<<HELP
+ProcessWire MCP Server
+
+Usage:
+  pw-mcp-server [options]
+
+Options:
+  --pw-path=PATH    Path to ProcessWire installation (default: current directory)
+                    Can also be set via PW_PATH environment variable
+  --help            Show this help message
+
+Examples:
+  pw-mcp-server --pw-path=/var/www/html
+  PW_PATH=/var/www/html pw-mcp-server
+  ddev exec php vendor/bin/pw-mcp-server --pw-path=/var/www/html
+
+HELP;
+    exit(0);
+}
+
+// Determine ProcessWire path
+$pwPath = $options['pw-path'] ?? getenv('PW_PATH') ?: getcwd();
+
+if (!$pwPath) {
+    fwrite(STDERR, "Error: ProcessWire path not specified.\n");
+    fwrite(STDERR, "Use --pw-path=/path/to/processwire or set PW_PATH environment variable.\n");
+    exit(1);
+}
+
+// Resolve to absolute path
+$pwPath = realpath($pwPath);
+
+if ($pwPath === false) {
+    fwrite(STDERR, "Error: Path does not exist.\n");
+    exit(1);
+}
+
+try {
+    // Bootstrap ProcessWire
+    $wire = ProcessWireBootstrap::boot($pwPath);
+
+    // Create and run the MCP server
+    $server = new ProcessWireMcpServer($wire);
+    $server->run();
+
+} catch (\Throwable $e) {
+    fwrite(STDERR, "Fatal Error: " . $e->getMessage() . "\n");
+    fwrite(STDERR, $e->getTraceAsString() . "\n");
+    exit(1);
+}
