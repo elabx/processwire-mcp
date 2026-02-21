@@ -6,6 +6,7 @@ namespace Elabx\ProcessWireMcp\Tool\Core;
 
 use Elabx\ProcessWireMcp\Tool\ProcessWireMcpTool;
 use Mcp\Capability\Attribute\McpTool;
+use Mcp\Capability\Attribute\Schema;
 use ProcessWire\Page;
 use ProcessWire\NullPage;
 
@@ -119,6 +120,7 @@ class PageTools extends ProcessWireMcpTool
         int|string $parent,
         string $title,
         ?string $name = null,
+        #[Schema(type: 'object', description: 'Optional object of field name => value pairs', additionalProperties: true)]
         array $fieldValues = []
     ): array {
         try {
@@ -182,7 +184,11 @@ class PageTools extends ProcessWireMcpTool
         name: 'update_page',
         description: 'Update page field values. Provide page ID/path and an array of field => value pairs. Cannot update admin pages.'
     )]
-    public function updatePage(int|string $identifier, array $fieldValues): array
+    public function updatePage(
+        int|string $identifier,
+        #[Schema(type: 'object', description: 'Object of field name => value pairs to update', additionalProperties: true)]
+        array $fieldValues
+    ): array
     {
         try {
             $page = $this->pages()->get($identifier);
