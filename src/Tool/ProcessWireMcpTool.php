@@ -172,6 +172,32 @@ abstract class ProcessWireMcpTool
     }
 
     /**
+     * Check if a page is a repeater page
+     */
+    protected function isRepeaterPage(Page $page): bool
+    {
+        return str_starts_with($page->template->name, 'repeater_');
+    }
+
+    /**
+     * Assert that the content page (the page owning this content) is not an admin page.
+     *
+     * For repeater pages, traces back to the content page via getForPage().
+     * For regular pages, falls through to assertNotAdminPage().
+     */
+    protected function assertContentPageNotAdmin(Page $page): void
+    {
+        if ($this->isRepeaterPage($page)) {
+            $contentPage = $page->getForPage();
+            if ($contentPage && $contentPage->id) {
+                $this->assertNotAdminPage($contentPage);
+            }
+        } else {
+            $this->assertNotAdminPage($page);
+        }
+    }
+
+    /**
      * Add admin exclusion to a selector string
      *
      * @param string $selector Original selector
