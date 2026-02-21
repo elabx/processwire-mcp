@@ -5,6 +5,7 @@
  * ProcessWire MCP Server Entry Point
  *
  * Usage:
+ *   vendor/bin/pw-mcp-server                          (auto-detects PW root)
  *   php pw-mcp-server --pw-path=/path/to/processwire
  *   PW_PATH=/path/to/processwire php pw-mcp-server
  */
@@ -46,26 +47,35 @@ Usage:
   pw-mcp-server [options]
 
 Options:
-  --pw-path=PATH    Path to ProcessWire installation (default: current directory)
+  --pw-path=PATH    Path to ProcessWire installation
                     Can also be set via PW_PATH environment variable
+                    Default: auto-detected relative to vendor/bin/
   --help            Show this help message
 
 Examples:
+  vendor/bin/pw-mcp-server
   pw-mcp-server --pw-path=/var/www/html
   PW_PATH=/var/www/html pw-mcp-server
-  ddev exec php vendor/bin/pw-mcp-server --pw-path=/var/www/html
+  ddev exec php vendor/bin/pw-mcp-server
 
 HELP;
     exit(0);
 }
 
 // Determine ProcessWire path
-$pwPath = $options['pw-path'] ?? getenv('PW_PATH') ?: getcwd();
+// Priority: --pw-path flag > PW_PATH env > auto-detect from vendor/bin location > cwd
+$pwPath = $options['pw-path'] ?? getenv('PW_PATH') ?: null;
 
-if (!$pwPath) {
-    fwrite(STDERR, "Error: ProcessWire path not specified.\n");
-    fwrite(STDERR, "Use --pw-path=/path/to/processwire or set PW_PATH environment variable.\n");
-    exit(1);
+if ($pwPath === null) {
+    // Auto-detect: when installed as dependency, binary is at vendor/bin/pw-mcp-server
+    // so the project root (where index.php lives) is two levels up
+    $vendorBinGuess = dirname(__DIR__, 2);
+    if (file_exists($vendorBinGuess . '/index.php') && file_exists($vendorBinGuess . '/site/config.php')) {
+        $pwPath = $vendorBinGuess;
+        fwrite(STDERR, "Auto-detected ProcessWire at: {$pwPath}\n");
+    } else {
+        $pwPath = getcwd();
+    }
 }
 
 // Resolve to absolute path
