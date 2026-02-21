@@ -31,11 +31,16 @@ ddev composer require elabx/processwire-mcp
 
 ### Running the Server
 
-```bash
-# With DDEV
-ddev exec php vendor/bin/pw-mcp-server --pw-path=/var/www/html
+The server auto-detects your ProcessWire root when installed via Composer — no path flag needed:
 
-# Standalone
+```bash
+# Auto-detects PW root (recommended)
+vendor/bin/pw-mcp-server
+
+# With DDEV
+ddev exec php vendor/bin/pw-mcp-server
+
+# Explicit path (if auto-detect doesn't work)
 php vendor/bin/pw-mcp-server --pw-path=/path/to/processwire
 
 # Using environment variable
@@ -44,14 +49,14 @@ PW_PATH=/path/to/processwire php vendor/bin/pw-mcp-server
 
 ### Claude Code Configuration
 
-Add to your `~/.claude/settings.json`:
+Add to your project's `.claude/settings.json` or `~/.claude/settings.json`:
 
 ```json
 {
   "mcpServers": {
     "processwire": {
       "command": "ddev",
-      "args": ["exec", "php", "vendor/bin/pw-mcp-server", "--pw-path=/var/www/html"]
+      "args": ["exec", "php", "vendor/bin/pw-mcp-server"]
     }
   }
 }
@@ -64,7 +69,7 @@ For non-DDEV setups:
   "mcpServers": {
     "processwire": {
       "command": "php",
-      "args": ["/path/to/vendor/bin/pw-mcp-server", "--pw-path=/path/to/processwire"]
+      "args": ["vendor/bin/pw-mcp-server"]
     }
   }
 }
