@@ -118,9 +118,9 @@ class FieldConfigTools extends ProcessWireMcpTool
                 // Find the matrix type number from name
                 $typesInfo = $matrixField->type->getMatrixTypesInfo($matrixField);
                 $matrixN = null;
-                foreach ($typesInfo as $n => $info) {
-                    if (($info['name'] ?? '') === $matrixTypeName) {
-                        $matrixN = $n;
+                foreach ($typesInfo as $typeName => $info) {
+                    if ($typeName === $matrixTypeName || ($info['name'] ?? '') === $matrixTypeName) {
+                        $matrixN = $info['type'] ?? null;
                         break;
                     }
                 }

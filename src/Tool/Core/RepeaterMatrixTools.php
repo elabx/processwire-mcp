@@ -55,10 +55,10 @@ class RepeaterMatrixTools extends ProcessWireMcpTool
             $typesInfo = $field->type->getMatrixTypesInfo($field);
             $types = [];
 
-            foreach ($typesInfo as $n => $info) {
+            foreach ($typesInfo as $typeName => $info) {
                 $typeData = [
-                    'n' => $n,
-                    'name' => $info['name'] ?? '',
+                    'n' => $info['type'] ?? 0,
+                    'name' => $info['name'] ?? $typeName,
                     'label' => $info['label'] ?? '',
                     'sort' => $info['sort'] ?? 0,
                     'head' => $info['head'] ?? '',
@@ -66,10 +66,10 @@ class RepeaterMatrixTools extends ProcessWireMcpTool
                 ];
 
                 // Get fields for this matrix type
+                // $info['fields'] is array<string, Field> (name => Field object)
                 if (!empty($info['fields'])) {
-                    foreach ($info['fields'] as $fieldId) {
-                        $f = $this->fields()->get((int) $fieldId);
-                        if (!$f) continue;
+                    foreach ($info['fields'] as $fName => $f) {
+                        if (!$f || !($f instanceof \ProcessWire\Field)) continue;
 
                         $fieldData = [
                             'name' => $f->name,
