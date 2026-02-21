@@ -7,6 +7,7 @@ namespace Elabx\ProcessWireMcp\Server;
 use ProcessWire\ProcessWire;
 use Elabx\ProcessWireMcp\Tool\ProcessWireMcpTool;
 use Elabx\ProcessWireMcp\Resource\ProcessWireMcpResource;
+use Mcp\Schema\Enum\ProtocolVersion;
 use Mcp\Server;
 use Mcp\Server\Transport\StdioTransport;
 use Psr\Container\ContainerInterface;
@@ -35,6 +36,7 @@ class ProcessWireMcpServer
 
         $server = Server::builder()
             ->setServerInfo('processwire-mcp', '1.0.0', 'MCP Server for ProcessWire CMS')
+            ->setProtocolVersion(ProtocolVersion::V2024_11_05)
             ->setContainer($this->createContainer())
             ->setDiscovery(
                 basePath: $packageRoot,
