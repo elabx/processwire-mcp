@@ -9,6 +9,9 @@ use ProcessWire\Pages;
 use ProcessWire\Templates;
 use ProcessWire\Fields;
 use ProcessWire\Users;
+use ProcessWire\Roles;
+use ProcessWire\Permissions;
+use ProcessWire\Modules;
 use ProcessWire\Sanitizer;
 use ProcessWire\Page;
 
@@ -112,6 +115,30 @@ abstract class ProcessWireMcpTool
     protected function users(): Users
     {
         return $this->wire->wire('users');
+    }
+
+    /**
+     * Get the Roles API
+     */
+    protected function roles(): Roles
+    {
+        return $this->wire->wire('roles');
+    }
+
+    /**
+     * Get the Permissions API
+     */
+    protected function permissions(): Permissions
+    {
+        return $this->wire->wire('permissions');
+    }
+
+    /**
+     * Get the Modules API
+     */
+    protected function modules(): Modules
+    {
+        return $this->wire->wire('modules');
     }
 
     /**

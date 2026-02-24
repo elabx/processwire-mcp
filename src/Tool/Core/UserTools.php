@@ -6,13 +6,14 @@ namespace Elabx\ProcessWireMcp\Tool\Core;
 
 use Elabx\ProcessWireMcp\Tool\ProcessWireMcpTool;
 use Mcp\Capability\Attribute\McpTool;
+use Mcp\Capability\Attribute\Schema;
 use ProcessWire\User;
 use ProcessWire\NullPage;
 
 /**
  * User management tools for ProcessWire MCP
  *
- * Provides tools for listing and inspecting users.
+ * Provides tools for managing users.
  * Note: Passwords are NEVER exposed for security.
  */
 class UserTools extends ProcessWireMcpTool
@@ -21,7 +22,7 @@ class UserTools extends ProcessWireMcpTool
     {
         return [
             'name' => 'user_tools',
-            'description' => 'User inspection tools for ProcessWire (read-only, no passwords)',
+            'description' => 'User management tools for ProcessWire',
             'priority' => 40,
         ];
     }
@@ -115,6 +116,187 @@ class UserTools extends ProcessWireMcpTool
 
         } catch (\Throwable $e) {
             return $this->error('Failed to get user: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Create a new user
+     *
+     * @param string $name Username
+     * @param string $email User email
+     * @param string $password User password
+     * @param array $roles Role names to assign
+     * @return array Created user data
+     */
+    #[McpTool(
+        name: 'create_user',
+        description: 'Create a new user with email, password, and roles. Password is never returned in the response.'
+    )]
+    public function createUser(
+        string $name,
+        string $email,
+        string $password,
+        array $roles = []
+    ): array {
+        try {
+            $sanitized = $this->sanitizer()->pageName($name);
+            if (empty($sanitized)) {
+                return $this->error("Invalid username: {$name}");
+            }
+
+            $sanitizedEmail = $this->sanitizer()->email($email);
+            if (empty($sanitizedEmail)) {
+                return $this->error("Invalid email: {$email}");
+            }
+
+            $existing = $this->users()->get("name=$sanitized");
+            if ($existing && $existing->id) {
+                return $this->error("User already exists: {$sanitized}");
+            }
+
+            $user = new User();
+            $user->name = $sanitized;
+            $user->pass = $password;
+            $user->email = $sanitizedEmail;
+
+            foreach ($roles as $roleName) {
+                $roleObj = $this->wire->wire('roles')->get($roleName);
+                if ($roleObj && $roleObj->id) {
+                    $user->addRole($roleObj);
+                }
+            }
+
+            $user->save();
+
+            return $this->success([
+                'message' => "User created: {$sanitized}",
+                'user' => $this->userToArray($user),
+            ]);
+
+        } catch (\Throwable $e) {
+            return $this->error('Failed to create user: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Update a user
+     *
+     * @param int|string $identifier User ID or name
+     * @param string|null $email New email
+     * @param string|null $password New password
+     * @param array $addRoles Roles to add
+     * @param array $removeRoles Roles to remove
+     * @param array $fieldValues Custom field values to set
+     * @return array Updated user data
+     */
+    #[McpTool(
+        name: 'update_user',
+        description: 'Update a user. Can change email, password, add/remove roles, and set custom field values. Password is never returned.'
+    )]
+    public function updateUser(
+        int|string $identifier,
+        ?string $email = null,
+        ?string $password = null,
+        array $addRoles = [],
+        array $removeRoles = [],
+        #[Schema(type: 'object', description: 'Custom field values to set (excludes pass, roles, email)', additionalProperties: true)]
+        array $fieldValues = []
+    ): array {
+        try {
+            $user = $this->users()->get($identifier);
+
+            if (!$user || $user instanceof NullPage || !$user->id) {
+                return $this->error("User not found: {$identifier}", 'NOT_FOUND');
+            }
+
+            if ($email !== null) {
+                $sanitizedEmail = $this->sanitizer()->email($email);
+                if (empty($sanitizedEmail)) {
+                    return $this->error("Invalid email: {$email}");
+                }
+                $user->email = $sanitizedEmail;
+            }
+
+            if ($password !== null) {
+                $user->pass = $password;
+            }
+
+            foreach ($addRoles as $roleName) {
+                $roleObj = $this->wire->wire('roles')->get($roleName);
+                if ($roleObj && $roleObj->id) {
+                    $user->addRole($roleObj);
+                }
+            }
+
+            foreach ($removeRoles as $roleName) {
+                $roleObj = $this->wire->wire('roles')->get($roleName);
+                if ($roleObj && $roleObj->id) {
+                    $user->removeRole($roleObj);
+                }
+            }
+
+            foreach ($fieldValues as $key => $value) {
+                if (in_array($key, ['pass', 'roles', 'email'])) {
+                    continue;
+                }
+                if ($user->template->fieldgroup->hasField($key)) {
+                    $user->set($key, $value);
+                }
+            }
+
+            $user->save();
+
+            return $this->success([
+                'message' => "User updated: {$user->name}",
+                'user' => $this->userToArray($user),
+            ]);
+
+        } catch (\Throwable $e) {
+            return $this->error('Failed to update user: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Delete a user
+     *
+     * @param int|string $identifier User ID or name
+     * @return array Deletion result
+     */
+    #[McpTool(
+        name: 'delete_user',
+        description: 'Delete a user. Cannot delete the superuser or guest user.'
+    )]
+    public function deleteUser(int|string $identifier): array
+    {
+        try {
+            $user = $this->users()->get($identifier);
+
+            if (!$user || $user instanceof NullPage || !$user->id) {
+                return $this->error("User not found: {$identifier}", 'NOT_FOUND');
+            }
+
+            if ($user->isSuperuser()) {
+                return $this->error('Cannot delete superuser');
+            }
+
+            if ($user->name === 'guest') {
+                return $this->error('Cannot delete guest user');
+            }
+
+            $deletedInfo = [
+                'id' => $user->id,
+                'name' => $user->name,
+            ];
+
+            $this->users()->delete($user);
+
+            return $this->success([
+                'message' => "User deleted: {$deletedInfo['name']}",
+                'deleted_user' => $deletedInfo,
+            ]);
+
+        } catch (\Throwable $e) {
+            return $this->error('Failed to delete user: ' . $e->getMessage());
         }
     }
 

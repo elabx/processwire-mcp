@@ -378,4 +378,156 @@ class PageTools extends ProcessWireMcpTool
             return $this->error('Failed to get children: ' . $e->getMessage());
         }
     }
+
+    /**
+     * Clone a page
+     *
+     * @param int|string $identifier Page ID or path
+     * @param string|null $newName Optional new name for the cloned page
+     * @param bool $recursive Whether to recursively clone child pages
+     * @return array Cloned page data
+     */
+    #[McpTool(
+        name: 'clone_page',
+        description: 'Clone a page. Optionally provide a new name and enable recursive cloning of child pages. Cannot clone system or admin pages.'
+    )]
+    public function clonePage(int|string $identifier, ?string $newName = null, bool $recursive = false): array
+    {
+        try {
+            $page = $this->pages()->get($identifier);
+
+            if (!$page || $page instanceof NullPage || !$page->id) {
+                return $this->error("Page not found: {$identifier}", 'NOT_FOUND');
+            }
+
+            // Security: Block admin pages
+            $this->assertNotAdminPage($page);
+
+            // Block system pages
+            if ($page->id <= 7) {
+                return $this->error(
+                    'Cannot clone system pages',
+                    'ACCESS_DENIED'
+                );
+            }
+
+            $clone = $this->pages()->clone($page, null, $recursive);
+
+            if (!$clone || $clone instanceof NullPage || !$clone->id) {
+                return $this->error('Failed to clone page');
+            }
+
+            if ($newName !== null) {
+                $clone->name = $this->sanitizer()->pageName($newName);
+                $clone->save();
+            }
+
+            return $this->success(
+                $this->pageToArray($clone),
+                "Page cloned successfully with ID {$clone->id}"
+            );
+
+        } catch (\InvalidArgumentException $e) {
+            return $this->error($e->getMessage(), 'ACCESS_DENIED');
+        } catch (\Throwable $e) {
+            return $this->error('Failed to clone page: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Sort a page relative to a reference sibling
+     *
+     * @param int|string $page Page ID or path to sort
+     * @param int|string $reference Reference sibling page ID or path
+     * @param string $position Position relative to reference: "before" or "after"
+     * @return array Sort result
+     */
+    #[McpTool(
+        name: 'sort_pages',
+        description: 'Sort a page relative to a reference sibling. Position can be "before" or "after" the reference page. Both pages must share the same parent.'
+    )]
+    public function sortPages(int|string $page, int|string $reference, string $position = 'after'): array
+    {
+        try {
+            $pageObj = $this->pages()->get($page);
+
+            if (!$pageObj || $pageObj instanceof NullPage || !$pageObj->id) {
+                return $this->error("Page not found: {$page}", 'NOT_FOUND');
+            }
+
+            $refObj = $this->pages()->get($reference);
+
+            if (!$refObj || $refObj instanceof NullPage || !$refObj->id) {
+                return $this->error("Reference page not found: {$reference}", 'NOT_FOUND');
+            }
+
+            // Security: Block admin pages
+            $this->assertNotAdminPage($pageObj);
+            $this->assertNotAdminPage($refObj);
+
+            // Validate same parent
+            if ($pageObj->parent_id !== $refObj->parent_id) {
+                return $this->error('Pages must share the same parent', 'INVALID_INPUT');
+            }
+
+            // Validate position
+            if (!in_array($position, ['before', 'after'])) {
+                return $this->error('Position must be "before" or "after"', 'INVALID_INPUT');
+            }
+
+            if ($position === 'before') {
+                $this->pages()->insertBefore($pageObj, $refObj);
+            } else {
+                $this->pages()->insertAfter($pageObj, $refObj);
+            }
+
+            return $this->success([
+                'page_id' => $pageObj->id,
+                'reference_id' => $refObj->id,
+                'position' => $position,
+            ], 'Page sorted successfully');
+
+        } catch (\InvalidArgumentException $e) {
+            return $this->error($e->getMessage(), 'ACCESS_DENIED');
+        } catch (\Throwable $e) {
+            return $this->error('Failed to sort pages: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Restore a page from trash
+     *
+     * @param int|string $identifier Page ID or path
+     * @return array Restored page data
+     */
+    #[McpTool(
+        name: 'restore_page',
+        description: 'Restore a page from trash back to its original location.'
+    )]
+    public function restorePage(int|string $identifier): array
+    {
+        try {
+            $page = $this->pages()->get($identifier);
+
+            if (!$page || $page instanceof NullPage || !$page->id) {
+                return $this->error("Page not found: {$identifier}", 'NOT_FOUND');
+            }
+
+            if (!$page->isTrash()) {
+                return $this->error('Page is not in trash', 'INVALID_INPUT');
+            }
+
+            $this->pages()->restore($page);
+
+            return $this->success(
+                $this->pageToArray($page),
+                'Page restored successfully'
+            );
+
+        } catch (\InvalidArgumentException $e) {
+            return $this->error($e->getMessage(), 'ACCESS_DENIED');
+        } catch (\Throwable $e) {
+            return $this->error('Failed to restore page: ' . $e->getMessage());
+        }
+    }
 }

@@ -10,7 +10,7 @@ use Mcp\Capability\Attribute\McpTool;
 /**
  * Template management tools for ProcessWire MCP
  *
- * Provides tools for listing and inspecting templates.
+ * Provides tools for listing, inspecting, creating, updating, and deleting templates.
  */
 class TemplateTools extends ProcessWireMcpTool
 {
@@ -234,6 +234,365 @@ class TemplateTools extends ProcessWireMcpTool
 
         } catch (\Throwable $e) {
             return $this->error('Failed to get template file: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Create a new template
+     *
+     * @param string $name Template name
+     * @param string|null $label Optional label
+     * @param string|null $icon Optional icon
+     * @return array Created template info
+     */
+    #[McpTool(
+        name: 'create_template',
+        description: 'Create a new template. Optionally set a label and icon.'
+    )]
+    public function createTemplate(string $name, ?string $label = null, ?string $icon = null): array
+    {
+        try {
+            $sanitized = $this->sanitizer()->name($name);
+
+            if (empty($sanitized)) {
+                return $this->error("Invalid template name: {$name}");
+            }
+
+            if ($this->templates()->get($sanitized)) {
+                return $this->error("Template already exists: {$sanitized}");
+            }
+
+            $t = $this->templates()->add($sanitized);
+
+            if ($label !== null) {
+                $t->label = $label;
+            }
+
+            if ($icon !== null) {
+                $t->icon = $icon;
+            }
+
+            $t->save();
+
+            return $this->success([
+                'id' => $t->id,
+                'name' => $t->name,
+                'label' => $t->label ?: $t->name,
+            ]);
+
+        } catch (\Throwable $e) {
+            return $this->error('Failed to create template: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Update template settings
+     *
+     * @param string $template Template name
+     * @param string|null $label Optional label
+     * @param string|null $icon Optional icon
+     * @param array|null $parentTemplates Optional parent template restrictions (array of template names)
+     * @param array|null $childTemplates Optional child template restrictions (array of template names)
+     * @param bool|null $noParents Optional flag to disallow parents
+     * @param bool|null $noChildren Optional flag to disallow children
+     * @param string|null $sortfield Optional sort field
+     * @param bool|null $urlSegments Optional URL segments toggle
+     * @param bool|null $https Optional HTTPS mode toggle
+     * @param int|null $cacheTime Optional cache time in seconds
+     * @return array Updated template info
+     */
+    #[McpTool(
+        name: 'update_template',
+        description: 'Update template settings. Can set label, icon, parent/child template restrictions, sort field, URL segments, HTTPS mode, and cache time.'
+    )]
+    public function updateTemplate(
+        string $template,
+        ?string $label = null,
+        ?string $icon = null,
+        ?array $parentTemplates = null,
+        ?array $childTemplates = null,
+        ?bool $noParents = null,
+        ?bool $noChildren = null,
+        ?string $sortfield = null,
+        ?bool $urlSegments = null,
+        ?bool $https = null,
+        ?int $cacheTime = null
+    ): array {
+        try {
+            $templateObj = $this->templates()->get($template);
+
+            if (!$templateObj) {
+                return $this->error("Template not found: {$template}", 'NOT_FOUND');
+            }
+
+            if ($templateObj->flags & \ProcessWire\Template::flagSystem) {
+                return $this->error("Cannot modify system template: {$template}");
+            }
+
+            if ($label !== null) {
+                $templateObj->label = $label;
+            }
+
+            if ($icon !== null) {
+                $templateObj->icon = $icon;
+            }
+
+            if ($parentTemplates !== null) {
+                $ids = [];
+                foreach ($parentTemplates as $name) {
+                    $t = $this->templates()->get($name);
+                    if ($t) {
+                        $ids[] = $t->id;
+                    }
+                }
+                $templateObj->parentTemplates = $ids;
+            }
+
+            if ($childTemplates !== null) {
+                $ids = [];
+                foreach ($childTemplates as $name) {
+                    $t = $this->templates()->get($name);
+                    if ($t) {
+                        $ids[] = $t->id;
+                    }
+                }
+                $templateObj->childTemplates = $ids;
+            }
+
+            if ($noParents !== null) {
+                $templateObj->noParents = (int) $noParents;
+            }
+
+            if ($noChildren !== null) {
+                $templateObj->noChildren = (int) $noChildren;
+            }
+
+            if ($sortfield !== null) {
+                $templateObj->sortfield = $sortfield;
+            }
+
+            if ($urlSegments !== null) {
+                $templateObj->urlSegments = $urlSegments;
+            }
+
+            if ($https !== null) {
+                $templateObj->https = $https;
+            }
+
+            if ($cacheTime !== null) {
+                $templateObj->cacheTime = $cacheTime;
+            }
+
+            $templateObj->save();
+
+            return $this->success([
+                'id' => $templateObj->id,
+                'name' => $templateObj->name,
+                'label' => $templateObj->label ?: $templateObj->name,
+                'icon' => $templateObj->icon,
+            ]);
+
+        } catch (\Throwable $e) {
+            return $this->error('Failed to update template: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Delete a template
+     *
+     * @param string $template Template name
+     * @return array Deleted template info
+     */
+    #[McpTool(
+        name: 'delete_template',
+        description: 'Delete a template. The template must not have any pages using it and must not be a system template.'
+    )]
+    public function deleteTemplate(string $template): array
+    {
+        try {
+            $templateObj = $this->templates()->get($template);
+
+            if (!$templateObj) {
+                return $this->error("Template not found: {$template}", 'NOT_FOUND');
+            }
+
+            if ($templateObj->flags & \ProcessWire\Template::flagSystem) {
+                return $this->error("Cannot delete system template: {$template}");
+            }
+
+            $count = $this->pages()->count("template={$templateObj->name}");
+
+            if ($count > 0) {
+                return $this->error("Cannot delete template '{$template}': {$count} page(s) are using it");
+            }
+
+            $id = $templateObj->id;
+            $name = $templateObj->name;
+
+            $this->templates()->delete($templateObj);
+
+            return $this->success([
+                'id' => $id,
+                'name' => $name,
+            ]);
+
+        } catch (\Throwable $e) {
+            return $this->error('Failed to delete template: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Clone an existing template with a new name
+     *
+     * @param string $template Source template name
+     * @param string $newName New template name
+     * @return array Cloned template info
+     */
+    #[McpTool(
+        name: 'clone_template',
+        description: 'Clone an existing template with a new name. Copies all fields and settings from the source template.'
+    )]
+    public function cloneTemplate(string $template, string $newName): array
+    {
+        try {
+            $templateObj = $this->templates()->get($template);
+
+            if (!$templateObj) {
+                return $this->error("Template not found: {$template}", 'NOT_FOUND');
+            }
+
+            $sanitizedName = $this->sanitizer()->name($newName);
+
+            if (empty($sanitizedName)) {
+                return $this->error("Invalid template name: {$newName}");
+            }
+
+            if ($this->templates()->get($sanitizedName)) {
+                return $this->error("Template already exists: {$sanitizedName}");
+            }
+
+            $clone = $this->templates()->clone($templateObj);
+            $clone->name = $sanitizedName;
+            $clone->save();
+
+            return $this->success([
+                'id' => $clone->id,
+                'name' => $clone->name,
+                'source' => $templateObj->name,
+                'field_count' => $clone->fieldgroup->count(),
+            ]);
+
+        } catch (\Throwable $e) {
+            return $this->error('Failed to clone template: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Add a field to a template
+     *
+     * @param string $template Template name
+     * @param string $field Field name
+     * @param string|null $afterField Optional field name to position after
+     * @param string|null $beforeField Optional field name to position before
+     * @return array Result info
+     */
+    #[McpTool(
+        name: 'add_field_to_template',
+        description: 'Add a field to a template. Optionally position it after or before another field.'
+    )]
+    public function addFieldToTemplate(
+        string $template,
+        string $field,
+        ?string $afterField = null,
+        ?string $beforeField = null
+    ): array {
+        try {
+            $templateObj = $this->templates()->get($template);
+
+            if (!$templateObj) {
+                return $this->error("Template not found: {$template}", 'NOT_FOUND');
+            }
+
+            $fieldObj = $this->fields()->get($field);
+
+            if (!$fieldObj) {
+                return $this->error("Field not found: {$field}", 'NOT_FOUND');
+            }
+
+            if ($templateObj->fieldgroup->hasField($fieldObj)) {
+                return $this->error("Field '{$field}' is already in template '{$template}'");
+            }
+
+            $templateObj->fieldgroup->add($fieldObj);
+
+            if ($afterField !== null) {
+                $afterFieldObj = $this->fields()->get($afterField);
+                if ($afterFieldObj) {
+                    $templateObj->fieldgroup->insertAfter($fieldObj, $afterFieldObj);
+                }
+            }
+
+            if ($beforeField !== null) {
+                $beforeFieldObj = $this->fields()->get($beforeField);
+                if ($beforeFieldObj) {
+                    $templateObj->fieldgroup->insertBefore($fieldObj, $beforeFieldObj);
+                }
+            }
+
+            $templateObj->fieldgroup->save();
+
+            return $this->success([
+                'template' => $templateObj->name,
+                'field' => $fieldObj->name,
+                'field_count' => $templateObj->fieldgroup->count(),
+            ]);
+
+        } catch (\Throwable $e) {
+            return $this->error('Failed to add field to template: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Remove a field from a template
+     *
+     * @param string $template Template name
+     * @param string $field Field name
+     * @return array Result info
+     */
+    #[McpTool(
+        name: 'remove_field_from_template',
+        description: 'Remove a field from a template.'
+    )]
+    public function removeFieldFromTemplate(string $template, string $field): array
+    {
+        try {
+            $templateObj = $this->templates()->get($template);
+
+            if (!$templateObj) {
+                return $this->error("Template not found: {$template}", 'NOT_FOUND');
+            }
+
+            $fieldObj = $this->fields()->get($field);
+
+            if (!$fieldObj) {
+                return $this->error("Field not found: {$field}", 'NOT_FOUND');
+            }
+
+            if (!$templateObj->fieldgroup->hasField($fieldObj)) {
+                return $this->error("Field '{$field}' is not in template '{$template}'");
+            }
+
+            $templateObj->fieldgroup->remove($fieldObj);
+            $templateObj->fieldgroup->save();
+
+            return $this->success([
+                'template' => $templateObj->name,
+                'field' => $fieldObj->name,
+                'field_count' => $templateObj->fieldgroup->count(),
+            ]);
+
+        } catch (\Throwable $e) {
+            return $this->error('Failed to remove field from template: ' . $e->getMessage());
         }
     }
 }
