@@ -5,8 +5,9 @@ An extensible MCP (Model Context Protocol) server for ProcessWire CMS that enabl
 ## Features
 
 - **Full ProcessWire API access** - Query, create, update, and delete pages
-- **Template & field inspection** - Understand your site's data structure
-- **User management** - List users and roles (passwords never exposed)
+- **Template & field management** - Inspect and modify your site's data structure
+- **User & role management** - Create users, manage roles and permissions
+- **Module management** - List, install, and configure modules
 - **File management** - Access page files and images
 - **Extensible architecture** - Third-party modules can register custom tools
 - **Security-focused** - Admin pages blocked, configurable restrictions
@@ -87,6 +88,9 @@ For non-DDEV setups:
 | `update_page` | Update page field values |
 | `delete_page` | Trash or permanently delete page |
 | `get_children` | Get child pages of a parent |
+| `clone_page` | Clone a page, optionally with children |
+| `sort_pages` | Sort a page relative to a sibling |
+| `restore_page` | Restore a page from trash |
 
 ### Template Tools
 
@@ -95,14 +99,24 @@ For non-DDEV setups:
 | `list_templates` | List all available templates |
 | `get_template_fields` | Get template fields and configuration |
 | `get_template_file` | Get template file path |
+| `create_template` | Create a new template |
+| `update_template` | Update template settings (label, restrictions, cache, etc.) |
+| `delete_template` | Delete a template (must have no pages) |
+| `clone_template` | Clone a template with all fields and settings |
+| `add_field_to_template` | Add a field to a template with positioning |
+| `remove_field_from_template` | Remove a field from a template |
 
 ### Field Tools
 
 | Tool | Description |
 |------|-------------|
-| `list_fields` | List all fields |
+| `list_fields` | List all fields, optionally filter by type |
 | `get_field` | Get field details and configuration |
 | `list_field_types` | List available field types |
+| `create_field` | Create a new field with type and settings |
+| `update_field` | Update field properties |
+| `delete_field` | Delete a field (must not be in use) |
+| `clone_field` | Clone a field with all settings |
 
 ### User Tools
 
@@ -110,7 +124,32 @@ For non-DDEV setups:
 |------|-------------|
 | `list_users` | List users (optionally by role) |
 | `get_user` | Get user details |
+| `create_user` | Create a user with email, password, and roles |
+| `update_user` | Update user email, password, or roles |
+| `delete_user` | Delete a user |
 | `list_roles` | List all roles |
+
+### Role Tools
+
+| Tool | Description |
+|------|-------------|
+| `create_role` | Create a new role with optional permissions |
+| `update_role` | Add or remove permissions from a role |
+| `delete_role` | Delete a role (must not be assigned to users) |
+| `list_permissions` | List all available permissions |
+| `create_permission` | Create a new permission |
+| `set_template_access` | Set role-based access control on a template |
+
+### Module Tools
+
+| Tool | Description |
+|------|-------------|
+| `list_modules` | List all modules (optionally installed only) |
+| `get_module_info` | Get module details and requirements |
+| `install_module` | Install a module (requires confirmation) |
+| `uninstall_module` | Uninstall a module (requires confirmation) |
+| `get_module_config` | Get module configuration (sensitive values redacted) |
+| `save_module_config` | Save module configuration values |
 
 ### File Tools
 
@@ -236,6 +275,8 @@ The MCP server includes several security measures:
 3. **Selector filtering** - Configurable blocked selectors (via module config)
 4. **System page protection** - Cannot delete system pages (ID <= 7)
 5. **File restrictions** - Only ProcessWire-managed files accessible
+6. **Module safety** - Install/uninstall require explicit confirmation
+7. **Config redaction** - Sensitive module config values (passwords, keys) are redacted
 
 ## Optional ProcessWire Module
 
@@ -249,9 +290,34 @@ Copy `ProcessWireMcp.module.php` to `site/modules/ProcessWireMcp/` and install v
 
 ## Testing
 
-Tests run inside DDEV against a live ProcessWire installation. This is required because the tools interact directly with ProcessWire APIs and the database.
+Tests run against a live ProcessWire installation. You can use either Docker (self-contained) or DDEV (existing dev environment).
 
-### Prerequisites
+### Docker (recommended for CI)
+
+The Docker setup provisions a fresh ProcessWire install and runs the full test suite with a single command:
+
+```bash
+# Run all tests
+docker compose -f docker-compose.test.yml run --rm tests
+
+# Run a specific test class
+docker compose -f docker-compose.test.yml run --rm tests --filter=PageToolsTest
+
+# Run with verbose output
+docker compose -f docker-compose.test.yml run --rm tests --testdox
+
+# Tear down containers
+docker compose -f docker-compose.test.yml down --volumes
+
+# Rebuild after Dockerfile changes
+docker compose -f docker-compose.test.yml build --no-cache tests
+```
+
+### DDEV
+
+If you already have a DDEV project with ProcessWire:
+
+#### Prerequisites
 
 - A working DDEV project with ProcessWire installed and a populated database
 - The package mounted into the DDEV container (e.g. via a docker-compose volume at `/packages/ProcessWireMcp`)
@@ -275,7 +341,7 @@ After changing autoload config, regenerate the autoloader:
 ddev composer dump-autoload
 ```
 
-### Running Tests
+#### Running Tests
 
 ```bash
 ddev exec vendor/bin/phpunit --configuration /packages/ProcessWireMcp/phpunit.xml
@@ -295,7 +361,7 @@ ddev exec vendor/bin/phpunit --configuration /packages/ProcessWireMcp/phpunit.xm
 
 ### How It Works
 
-The test bootstrap (`tests/bootstrap.php`) loads the host project's Composer autoloader at `/var/www/html/vendor/autoload.php`, then boots ProcessWire by including its `index.php`. This gives tests access to the full ProcessWire API with a real database connection — the same environment the MCP server runs in.
+The test bootstrap (`tests/bootstrap.php`) loads the host project's Composer autoloader, then boots ProcessWire by including its `index.php`. This gives tests access to the full ProcessWire API with a real database connection — the same environment the MCP server runs in. The `PW_PATH` environment variable controls the ProcessWire root (defaults to `/var/www/html`).
 
 `tests/ProcessWireTestCase.php` is the base class for all tests. It exposes `$this->wire()` which returns the bootstrapped `ProcessWire` instance.
 

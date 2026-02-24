@@ -20,7 +20,8 @@ class FieldToolsTest extends ProcessWireTestCase
 
     public function testListFields(): void
     {
-        $result = $this->tools->listFields();
+        // Include system fields since a default install may only have system fields
+        $result = $this->tools->listFields(includeSystem: true);
 
         $this->assertTrue($result['success']);
         $this->assertGreaterThan(0, $result['data']['count']);

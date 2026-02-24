@@ -1,0 +1,33 @@
+services:
+  database:
+    image: mariadb:10.6
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: docker
+      MYSQL_USER: docker
+      MYSQL_PASSWORD: docker
+    healthcheck:
+      test: ["CMD", "mariadb", "-uroot", "-proot", "-e", "SELECT 1"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+    tmpfs:
+      - /var/lib/mysql
+
+  tests:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.test
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      PW_DB_HOST: database
+      PW_DB_NAME: docker
+      PW_DB_USER: docker
+      PW_DB_PASS: docker
+      PW_DB_PORT: "3306"
+      PW_ADMIN_USER: admin
+      PW_ADMIN_PASS: admin123
+    volumes:
+      - .:/package:ro

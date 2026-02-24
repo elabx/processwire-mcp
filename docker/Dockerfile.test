@@ -1,0 +1,25 @@
+FROM php:8.2-cli
+
+# PHP extensions required by ProcessWire
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git unzip libpng-dev libjpeg-dev libfreetype6-dev libzip-dev \
+    libonig-dev default-mysql-client \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install gd mysqli pdo_mysql zip mbstring \
+    && rm -rf /var/lib/apt/lists/*
+
+# Composer
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+# wire-cli (ProcessWire CLI tool)
+RUN COMPOSER_ALLOW_SUPERUSER=1 composer global require wirecli/wire-cli
+ENV PATH="/root/.composer/vendor/bin:${PATH}"
+
+# Entrypoint script
+COPY docker/docker-entrypoint-test.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint-test.sh
+
+WORKDIR /var/www/html
+
+ENTRYPOINT ["docker-entrypoint-test.sh"]
+CMD ["--colors=always"]
