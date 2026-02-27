@@ -11,6 +11,7 @@ namespace ProcessWire;
  * Installing this module enables hooks for third-party tool registration.
  *
  * @property string $blockedSelectors
+ * @property string $remoteSites
  */
 class ProcessWireMcp extends WireData implements Module, ConfigurableModule
 {
@@ -42,6 +43,7 @@ class ProcessWireMcp extends WireData implements Module, ConfigurableModule
     {
         parent::__construct();
         $this->set('blockedSelectors', '');
+        $this->set('remoteSites', '');
     }
 
     /**
@@ -125,6 +127,22 @@ class ProcessWireMcp extends WireData implements Module, ConfigurableModule
         $f->rows = 5;
         $inputfields->add($f);
 
+        // Remote sites
+        /** @var InputfieldTextarea $f */
+        $f = $modules->get('InputfieldTextarea');
+        $f->name = 'remoteSites';
+        $f->label = 'Remote Sites (DDEV Multi-Instance)';
+        $f->description = 'Configure remote ProcessWire sites accessible via DDEV for cross-site tool execution. One site per line.';
+        $f->notes = 'Format: project-name | Optional Label | /optional/pw/path' . "\n"
+            . 'Example: my-other-site | My Other Site | /var/www/html' . "\n"
+            . 'Lines starting with # are treated as comments.';
+        $f->value = $this->get('remoteSites');
+        $f->rows = 5;
+        $f->collapsed = empty($this->get('remoteSites'))
+            ? \ProcessWire\Inputfield::collapsedYes
+            : \ProcessWire\Inputfield::collapsedNo;
+        $inputfields->add($f);
+
         return $inputfields;
     }
 
@@ -161,6 +179,11 @@ php vendor/bin/pw-mcp-server --pw-path=/path/to/processwire</pre>
     <h4>Claude Code Configuration</h4>
     <p>Add the following to your Claude Code settings (<code>~/.claude/settings.json</code>):</p>
     <pre style="background: #333; color: #fff; padding: 15px; border-radius: 3px; overflow-x: auto;">{$exampleConfig}</pre>
+
+    <h4>Remote Sites (Multi-Instance)</h4>
+    <p>In DDEV environments, you can configure remote ProcessWire sites to enable cross-site tool execution.
+    Use the "Remote Sites" field below to whitelist DDEV projects, then use <code>list_remote_sites</code>,
+    <code>list_remote_tools</code>, and <code>remote_call</code> tools to interact with them.</p>
 
     <h4>Registering Custom Tools</h4>
     <p>Third-party modules can register custom MCP tools by hooking into this module:</p>
