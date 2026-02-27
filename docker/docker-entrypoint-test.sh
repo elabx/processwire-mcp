@@ -56,6 +56,16 @@ COMPOSER_ALLOW_SUPERUSER=1 composer install --no-interaction --prefer-dist \
 
 # Step 4: Run PHPUnit
 echo "[4/4] Running tests..."
-exec /var/www/html/vendor/bin/phpunit \
+# ProcessWire's shutdown handler can override PHPUnit's exit code (exit 255),
+# so we capture the output and derive the result from PHPUnit's summary line.
+set +e
+/var/www/html/vendor/bin/phpunit \
     --configuration /var/www/html/vendor/elabx/processwire-mcp/phpunit.xml \
-    "$@"
+    "$@" 2>&1 | tee /tmp/phpunit-output.txt
+set -e
+
+# PHPUnit prints "OK (...)" on success — trust that over the PHP exit code
+if grep -q "^OK " /tmp/phpunit-output.txt; then
+    exit 0
+fi
+exit 1

@@ -144,6 +144,7 @@ class ModuleTools extends ProcessWireMcpTool
                 return $this->error("Module is already installed: {$className}");
             }
 
+            $this->modules()->resetCache();
             $module = $this->modules()->install($className);
 
             if (!$module) {
