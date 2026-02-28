@@ -235,17 +235,13 @@ class RepeaterMatrixTools extends ProcessWireMcpTool
             $newItem = $items->getNewItem();
             $newItem->setMatrixType($matrixType);
 
-            // Set field values
+            // Set field values — use set() directly without hasField() check,
+            // as matrix type field mappings may not be in PW's runtime cache
             $set = [];
-            $skipped = [];
 
             foreach ($fieldValues as $fName => $fValue) {
-                if ($newItem->hasField($fName)) {
-                    $newItem->set($fName, $fValue);
-                    $set[] = $fName;
-                } else {
-                    $skipped[] = $fName;
-                }
+                $newItem->set($fName, $fValue);
+                $set[] = $fName;
             }
 
             $newItem->save();
@@ -256,10 +252,6 @@ class RepeaterMatrixTools extends ProcessWireMcpTool
                 'matrix_type' => $newItem->matrix('name'),
                 'set_fields' => $set,
             ];
-
-            if (!empty($skipped)) {
-                $result['skipped_fields'] = $skipped;
-            }
 
             return $this->success($result, "Matrix item added with ID {$newItem->id}");
 
@@ -312,12 +304,8 @@ class RepeaterMatrixTools extends ProcessWireMcpTool
             $skipped = [];
 
             foreach ($fieldValues as $fName => $fValue) {
-                if ($item->hasField($fName)) {
-                    $item->set($fName, $fValue);
-                    $updated[] = $fName;
-                } else {
-                    $skipped[] = $fName;
-                }
+                $item->set($fName, $fValue);
+                $updated[] = $fName;
             }
 
             $item->save();
@@ -328,16 +316,372 @@ class RepeaterMatrixTools extends ProcessWireMcpTool
                 'updated_fields' => $updated,
             ];
 
-            if (!empty($skipped)) {
-                $result['skipped_fields'] = $skipped;
-            }
-
             return $this->success($result, 'Matrix item updated successfully');
 
         } catch (\InvalidArgumentException $e) {
             return $this->error($e->getMessage(), 'ACCESS_DENIED');
         } catch (\Throwable $e) {
             return $this->error('Failed to update matrix item: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Create a new matrix type on a RepeaterMatrix field
+     *
+     * @param string $fieldName Name of the RepeaterMatrix field
+     * @param string $name Machine name for the matrix type (lowercase, no spaces)
+     * @param string $label Human-readable label
+     * @param array $fields Array of field names to include in this matrix type
+     * @param string|null $head Head format string (e.g. "{matrix_label}: {headline}")
+     * @return array Created matrix type info
+     */
+    #[McpTool(
+        name: 'create_matrix_type',
+        description: 'Create a new matrix type on a RepeaterMatrix field. Specify the type name, label, and which fields to include.'
+    )]
+    public function createMatrixType(
+        string $fieldName,
+        string $name,
+        string $label,
+        #[Schema(type: 'array', description: 'Array of field names to include in this matrix type')]
+        array $fields,
+        ?string $head = null
+    ): array {
+        try {
+            $field = $this->fields()->get($fieldName);
+
+            if (!$field) {
+                return $this->error("Field not found: {$fieldName}", 'NOT_FOUND');
+            }
+
+            if ($field->type->className() !== 'FieldtypeRepeaterMatrix') {
+                return $this->error(
+                    "Field '{$fieldName}' is {$field->type->className()}, not FieldtypeRepeaterMatrix.",
+                    'INVALID_INPUT'
+                );
+            }
+
+            // Sanitize the type name
+            $name = $this->sanitizer()->fieldName($name);
+            if (!$name) {
+                return $this->error('Invalid matrix type name.', 'INVALID_INPUT');
+            }
+
+            // Check for duplicate names
+            $data = $field->getArray();
+            for ($i = 0; $i <= 100; $i++) {
+                if (isset($data["matrix{$i}_name"]) && $data["matrix{$i}_name"] === $name) {
+                    return $this->error("Matrix type '{$name}' already exists (n={$i}).", 'ALREADY_EXISTS');
+                }
+            }
+
+            // Find the next available type number
+            $n = 0;
+            for ($i = 1; $i <= 100; $i++) {
+                if (empty($data["matrix{$i}_name"])) {
+                    $n = $i;
+                    break;
+                }
+            }
+
+            if ($n === 0) {
+                return $this->error('No available matrix type slot (max 100 types).', 'LIMIT_REACHED');
+            }
+
+            // Resolve field names to IDs and validate they exist
+            $fieldIds = [];
+            $resolvedFields = [];
+            $notFound = [];
+
+            foreach ($fields as $fName) {
+                $f = $this->fields()->get($fName);
+                if ($f) {
+                    $fieldIds[] = $f->id;
+                    $resolvedFields[] = $f->name;
+                } else {
+                    $notFound[] = $fName;
+                }
+            }
+
+            if (!empty($notFound)) {
+                return $this->error(
+                    'Fields not found: ' . implode(', ', $notFound),
+                    'NOT_FOUND'
+                );
+            }
+
+            // Set matrix type properties on the field first
+            $field->set("matrix{$n}_name", $name);
+            $field->set("matrix{$n}_label", $label);
+            $field->set("matrix{$n}_sort", $n);
+            $field->set("matrix{$n}_fields", $fieldIds);
+
+            // Ensure fields are in the repeater's fieldgroup
+            $repeaterTemplate = $field->type->getMatrixTemplate($field);
+            if ($repeaterTemplate) {
+                $fieldgroup = $repeaterTemplate->fieldgroup;
+                $added = [];
+                foreach ($fieldIds as $fId) {
+                    $f = $this->fields()->get($fId);
+                    if ($f && !$fieldgroup->hasField($f)) {
+                        $fieldgroup->add($f);
+                        $added[] = $f->name;
+                    }
+                }
+                if (!empty($added)) {
+                    $fieldgroup->save();
+                }
+            }
+
+            if ($head !== null) {
+                $field->set("matrix{$n}_head", $head);
+            }
+
+            $this->fields()->save($field);
+
+            $result = [
+                'n' => $n,
+                'name' => $name,
+                'label' => $label,
+                'fields' => $resolvedFields,
+            ];
+
+            if ($head !== null) {
+                $result['head'] = $head;
+            }
+
+            return $this->success($result, "Matrix type '{$name}' created as type {$n}");
+
+        } catch (\Throwable $e) {
+            return $this->error('Failed to create matrix type: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Update an existing matrix type on a RepeaterMatrix field
+     *
+     * @param string $fieldName Name of the RepeaterMatrix field
+     * @param string $name Current machine name of the matrix type to update
+     * @param string|null $label New label (null to keep current)
+     * @param string|null $head New head format string (null to keep current)
+     * @param array $addFields Field names to add to this matrix type
+     * @param array $removeFields Field names to remove from this matrix type
+     * @return array Updated matrix type info
+     */
+    #[McpTool(
+        name: 'update_matrix_type',
+        description: 'Update an existing matrix type. Can change label, head format, add fields, and remove fields.'
+    )]
+    public function updateMatrixType(
+        string $fieldName,
+        string $name,
+        ?string $label = null,
+        ?string $head = null,
+        #[Schema(type: 'array', description: 'Field names to add to this matrix type')]
+        array $addFields = [],
+        #[Schema(type: 'array', description: 'Field names to remove from this matrix type')]
+        array $removeFields = []
+    ): array {
+        try {
+            $field = $this->fields()->get($fieldName);
+
+            if (!$field) {
+                return $this->error("Field not found: {$fieldName}", 'NOT_FOUND');
+            }
+
+            if ($field->type->className() !== 'FieldtypeRepeaterMatrix') {
+                return $this->error(
+                    "Field '{$fieldName}' is {$field->type->className()}, not FieldtypeRepeaterMatrix.",
+                    'INVALID_INPUT'
+                );
+            }
+
+            // Find the type number for this name
+            $data = $field->getArray();
+            $n = null;
+            for ($i = 0; $i <= 100; $i++) {
+                if (isset($data["matrix{$i}_name"]) && $data["matrix{$i}_name"] === $name) {
+                    $n = $i;
+                    break;
+                }
+            }
+
+            if ($n === null) {
+                return $this->error("Matrix type '{$name}' not found on field '{$fieldName}'.", 'NOT_FOUND');
+            }
+
+            $changes = [];
+
+            // Update label
+            if ($label !== null) {
+                $field->set("matrix{$n}_label", $label);
+                $changes[] = 'label';
+            }
+
+            // Update head
+            if ($head !== null) {
+                $field->set("matrix{$n}_head", $head);
+                $changes[] = 'head';
+            }
+
+            // Get current field IDs
+            $currentFieldIds = array_filter(
+                array_map('intval', explode(',', $data["matrix{$n}_fields"] ?? '')),
+                fn($id) => $id > 0
+            );
+
+            // Add fields
+            $addedFields = [];
+            $notFound = [];
+            foreach ($addFields as $fName) {
+                $f = $this->fields()->get($fName);
+                if (!$f) {
+                    $notFound[] = $fName;
+                    continue;
+                }
+                if (!in_array($f->id, $currentFieldIds)) {
+                    $currentFieldIds[] = $f->id;
+                    $addedFields[] = $f->name;
+                }
+            }
+
+            if (!empty($notFound)) {
+                return $this->error('Fields not found: ' . implode(', ', $notFound), 'NOT_FOUND');
+            }
+
+            // Remove fields
+            $removedFields = [];
+            foreach ($removeFields as $fName) {
+                $f = $this->fields()->get($fName);
+                if (!$f) {
+                    $notFound[] = $fName;
+                    continue;
+                }
+                $key = array_search($f->id, $currentFieldIds);
+                if ($key !== false) {
+                    unset($currentFieldIds[$key]);
+                    $removedFields[] = $f->name;
+                }
+            }
+
+            if (!empty($notFound)) {
+                return $this->error('Fields not found: ' . implode(', ', $notFound), 'NOT_FOUND');
+            }
+
+            // Update field IDs if changed
+            if (!empty($addedFields) || !empty($removedFields)) {
+                $currentFieldIds = array_values($currentFieldIds);
+                $field->set("matrix{$n}_fields", $currentFieldIds);
+                if (!empty($addedFields)) $changes[] = 'added_fields';
+                if (!empty($removedFields)) $changes[] = 'removed_fields';
+
+                // Ensure added fields are in the repeater's fieldgroup
+                if (!empty($addedFields)) {
+                    $repeaterTemplate = $field->type->getMatrixTemplate($field);
+                    if ($repeaterTemplate) {
+                        $fieldgroup = $repeaterTemplate->fieldgroup;
+                        foreach ($addedFields as $afName) {
+                            $af = $this->fields()->get($afName);
+                            if ($af && !$fieldgroup->hasField($af)) {
+                                $fieldgroup->add($af);
+                            }
+                        }
+                        $fieldgroup->save();
+                    }
+                }
+            }
+
+            if (empty($changes)) {
+                return $this->error('No changes specified.', 'INVALID_INPUT');
+            }
+
+            $this->fields()->save($field);
+
+            // Resolve current field names for response
+            $currentFieldNames = [];
+            foreach ($currentFieldIds as $fId) {
+                $f = $this->fields()->get($fId);
+                if ($f) $currentFieldNames[] = $f->name;
+            }
+
+            $result = [
+                'n' => $n,
+                'name' => $name,
+                'label' => $label ?? ($data["matrix{$n}_label"] ?? ''),
+                'changes' => $changes,
+                'fields' => $currentFieldNames,
+            ];
+
+            if (!empty($addedFields)) $result['added_fields'] = $addedFields;
+            if (!empty($removedFields)) $result['removed_fields'] = $removedFields;
+
+            return $this->success($result, "Matrix type '{$name}' updated");
+
+        } catch (\Throwable $e) {
+            return $this->error('Failed to update matrix type: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Delete a matrix type from a RepeaterMatrix field
+     *
+     * @param string $fieldName Name of the RepeaterMatrix field
+     * @param string $name Machine name of the matrix type to delete
+     * @return array Deletion result
+     */
+    #[McpTool(
+        name: 'delete_matrix_type',
+        description: 'Delete a matrix type from a RepeaterMatrix field by name. Removes the type definition; does not delete existing items using this type.'
+    )]
+    public function deleteMatrixType(
+        string $fieldName,
+        string $name
+    ): array {
+        try {
+            $field = $this->fields()->get($fieldName);
+
+            if (!$field) {
+                return $this->error("Field not found: {$fieldName}", 'NOT_FOUND');
+            }
+
+            if ($field->type->className() !== 'FieldtypeRepeaterMatrix') {
+                return $this->error(
+                    "Field '{$fieldName}' is {$field->type->className()}, not FieldtypeRepeaterMatrix.",
+                    'INVALID_INPUT'
+                );
+            }
+
+            // Find the type number for this name
+            $data = $field->getArray();
+            $n = null;
+            for ($i = 0; $i <= 100; $i++) {
+                if (isset($data["matrix{$i}_name"]) && $data["matrix{$i}_name"] === $name) {
+                    $n = $i;
+                    break;
+                }
+            }
+
+            if ($n === null) {
+                return $this->error("Matrix type '{$name}' not found on field '{$fieldName}'.", 'NOT_FOUND');
+            }
+
+            // Remove all matrix{N}_* properties
+            $field->set("matrix{$n}_name", '');
+            $field->set("matrix{$n}_label", '');
+            $field->set("matrix{$n}_sort", 0);
+            $field->set("matrix{$n}_head", '');
+            $field->set("matrix{$n}_fields", '');
+
+            $this->fields()->save($field);
+
+            return $this->success([
+                'n' => $n,
+                'name' => $name,
+                'field' => $fieldName,
+            ], "Matrix type '{$name}' (n={$n}) deleted from field '{$fieldName}'");
+
+        } catch (\Throwable $e) {
+            return $this->error('Failed to delete matrix type: ' . $e->getMessage());
         }
     }
 

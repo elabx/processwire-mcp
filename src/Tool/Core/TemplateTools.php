@@ -24,6 +24,62 @@ class TemplateTools extends ProcessWireMcpTool
     }
 
     /**
+     * Find templates using ProcessWire selector syntax
+     *
+     * @param string $selector ProcessWire selector string
+     * @return array Matching templates
+     */
+    #[McpTool(
+        name: 'find_templates',
+        description: <<<'DESC'
+Find templates using ProcessWire selector syntax. Supports these selectors:
+- name=template-name (exact match)
+- name%=partial (contains)
+- name^=starts (starts with)
+- name$=ends (ends with)
+- label%=partial (label contains)
+- flags=system (system templates only)
+- flags=0 (non-system templates)
+- sort=name (sort by name, -name for reverse)
+- sort=modified (sort by modified date)
+- limit=10 (limit results)
+- id=123 (by ID)
+- id>100 (ID comparison)
+Examples:
+  "name^=home" — templates starting with "home"
+  "name%=blog, flags=0" — non-system templates containing "blog"
+  "sort=-modified, limit=5" — 5 most recently modified templates
+DESC
+    )]
+    public function findTemplates(string $selector): array
+    {
+        try {
+            $templates = $this->templates()->find($selector);
+            $results = [];
+
+            foreach ($templates as $template) {
+                $results[] = [
+                    'id' => $template->id,
+                    'name' => $template->name,
+                    'label' => $template->label ?: $template->name,
+                    'field_count' => $template->fieldgroup->count(),
+                    'page_count' => $this->pages()->count("template={$template->name}, include=all"),
+                    'is_system' => (bool) ($template->flags & \ProcessWire\Template::flagSystem),
+                ];
+            }
+
+            return $this->success([
+                'count' => count($results),
+                'selector' => $selector,
+                'templates' => $results,
+            ]);
+
+        } catch (\Throwable $e) {
+            return $this->error('Failed to find templates: ' . $e->getMessage());
+        }
+    }
+
+    /**
      * List all available templates
      *
      * @param bool $includeSystem Whether to include system templates (admin, user, etc.)
@@ -593,6 +649,82 @@ class TemplateTools extends ProcessWireMcpTool
 
         } catch (\Throwable $e) {
             return $this->error('Failed to remove field from template: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Reorder a field within a template (move it before or after another field)
+     *
+     * @param string $template Template name
+     * @param string $field Field name to move
+     * @param string|null $afterField Place after this field
+     * @param string|null $beforeField Place before this field
+     * @return array Result info with new field order
+     */
+    #[McpTool(
+        name: 'reorder_field_in_template',
+        description: 'Move a field to a new position within a template. Specify afterField or beforeField to set position.'
+    )]
+    public function reorderFieldInTemplate(
+        string $template,
+        string $field,
+        ?string $afterField = null,
+        ?string $beforeField = null
+    ): array {
+        try {
+            $templateObj = $this->templates()->get($template);
+
+            if (!$templateObj) {
+                return $this->error("Template not found: {$template}", 'NOT_FOUND');
+            }
+
+            $fieldObj = $this->fields()->get($field);
+
+            if (!$fieldObj) {
+                return $this->error("Field not found: {$field}", 'NOT_FOUND');
+            }
+
+            if (!$templateObj->fieldgroup->hasField($fieldObj)) {
+                return $this->error("Field '{$field}' is not in template '{$template}'", 'NOT_FOUND');
+            }
+
+            if ($afterField === null && $beforeField === null) {
+                return $this->error('Must specify afterField or beforeField.', 'INVALID_INPUT');
+            }
+
+            if ($afterField !== null) {
+                $refField = $this->fields()->get($afterField);
+                if (!$refField || !$templateObj->fieldgroup->hasField($refField)) {
+                    return $this->error("Reference field '{$afterField}' not found in template.", 'NOT_FOUND');
+                }
+                $templateObj->fieldgroup->insertAfter($fieldObj, $refField);
+            }
+
+            if ($beforeField !== null) {
+                $refField = $this->fields()->get($beforeField);
+                if (!$refField || !$templateObj->fieldgroup->hasField($refField)) {
+                    return $this->error("Reference field '{$beforeField}' not found in template.", 'NOT_FOUND');
+                }
+                $templateObj->fieldgroup->insertBefore($fieldObj, $refField);
+            }
+
+            $templateObj->fieldgroup->save();
+
+            // Return the new field order
+            $fieldOrder = [];
+            foreach ($templateObj->fieldgroup as $f) {
+                $fieldOrder[] = $f->name;
+            }
+
+            return $this->success([
+                'template' => $templateObj->name,
+                'field' => $fieldObj->name,
+                'position' => array_search($fieldObj->name, $fieldOrder),
+                'field_order' => $fieldOrder,
+            ], "Field '{$field}' repositioned in template '{$template}'");
+
+        } catch (\Throwable $e) {
+            return $this->error('Failed to reorder field: ' . $e->getMessage());
         }
     }
 }

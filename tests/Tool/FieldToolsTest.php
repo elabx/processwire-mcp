@@ -39,6 +39,49 @@ class FieldToolsTest extends ProcessWireTestCase
         parent::tearDown();
     }
 
+    public function testFindFieldsByName(): void
+    {
+        $result = $this->tools->findFields('name=title');
+
+        $this->assertTrue($result['success']);
+        $this->assertEquals(1, $result['data']['count']);
+        $this->assertEquals('title', $result['data']['fields'][0]['name']);
+    }
+
+    public function testFindFieldsByNameContains(): void
+    {
+        $result = $this->tools->findFields('name%=title');
+
+        $this->assertTrue($result['success']);
+        $this->assertGreaterThan(0, $result['data']['count']);
+    }
+
+    public function testFindFieldsByTypeShorthand(): void
+    {
+        // "type=text" should be normalized to "type=FieldtypeText"
+        $result = $this->tools->findFields('type=text');
+
+        $this->assertTrue($result['success']);
+        // The selector should have been normalized
+        $this->assertStringContainsString('FieldtypeText', $result['data']['selector']);
+    }
+
+    public function testFindFieldsNoResults(): void
+    {
+        $result = $this->tools->findFields('name=zzz_nonexistent_field_xyz');
+
+        $this->assertTrue($result['success']);
+        $this->assertEquals(0, $result['data']['count']);
+    }
+
+    public function testFindFieldsWithLimit(): void
+    {
+        $result = $this->tools->findFields('sort=name, limit=2');
+
+        $this->assertTrue($result['success']);
+        $this->assertLessThanOrEqual(2, $result['data']['count']);
+    }
+
     public function testListFields(): void
     {
         // Include system fields since a default install may only have system fields
@@ -150,5 +193,78 @@ class FieldToolsTest extends ProcessWireTestCase
 
         $this->assertFalse($result['success']);
         $this->assertEquals('NOT_FOUND', $result['code']);
+    }
+
+    public function testCreateRepeaterFieldWithSubfields(): void
+    {
+        if (!$this->wire()->wire('modules')->isInstalled('FieldtypeRepeater')) {
+            $this->markTestSkipped('FieldtypeRepeater is not installed.');
+        }
+
+        // Create a text field to use inside the repeater
+        $this->tools->createField('mcp_test_rep_sub', 'text', 'Repeater Subfield');
+        $this->createdFields[] = 'mcp_test_rep_sub';
+
+        // Create a repeater field with repeaterFields
+        $result = $this->tools->createField(
+            'mcp_test_repeater',
+            'FieldtypeRepeater',
+            'Test Repeater',
+            settings: ['repeaterFields' => ['mcp_test_rep_sub']]
+        );
+        $this->createdFields[] = 'mcp_test_repeater';
+
+        $this->assertTrue($result['success']);
+        $this->assertEquals('mcp_test_repeater', $result['data']['name']);
+        $this->assertEquals('FieldtypeRepeater', $result['data']['type']);
+        $this->assertArrayHasKey('repeater', $result['data']);
+        $this->assertContains('mcp_test_rep_sub', $result['data']['repeater']['fields_added']);
+    }
+
+    public function testCreateRepeaterFieldWithoutSubfields(): void
+    {
+        if (!$this->wire()->wire('modules')->isInstalled('FieldtypeRepeater')) {
+            $this->markTestSkipped('FieldtypeRepeater is not installed.');
+        }
+
+        // Create a repeater field without repeaterFields — no repeater key expected
+        $result = $this->tools->createField(
+            'mcp_test_rep_bare',
+            'FieldtypeRepeater',
+            'Bare Repeater'
+        );
+        $this->createdFields[] = 'mcp_test_rep_bare';
+
+        $this->assertTrue($result['success']);
+        $this->assertEquals('FieldtypeRepeater', $result['data']['type']);
+        $this->assertArrayNotHasKey('repeater', $result['data']);
+    }
+
+    public function testUpdateFieldAddsRepeaterSubfields(): void
+    {
+        if (!$this->wire()->wire('modules')->isInstalled('FieldtypeRepeater')) {
+            $this->markTestSkipped('FieldtypeRepeater is not installed.');
+        }
+
+        // Create subfield and repeater field
+        $this->tools->createField('mcp_test_rep_sub2', 'text', 'Sub 2');
+        $this->createdFields[] = 'mcp_test_rep_sub2';
+
+        $this->tools->createField(
+            'mcp_test_rep_upd',
+            'FieldtypeRepeater',
+            'Repeater For Update'
+        );
+        $this->createdFields[] = 'mcp_test_rep_upd';
+
+        // Update the repeater to add subfields
+        $result = $this->tools->updateField(
+            'mcp_test_rep_upd',
+            settings: ['repeaterFields' => ['mcp_test_rep_sub2']]
+        );
+
+        $this->assertTrue($result['success']);
+        $this->assertArrayHasKey('repeater', $result['data']);
+        $this->assertContains('mcp_test_rep_sub2', $result['data']['repeater']['fields_added']);
     }
 }

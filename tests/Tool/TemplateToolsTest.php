@@ -55,6 +55,49 @@ class TemplateToolsTest extends ProcessWireTestCase
         parent::tearDown();
     }
 
+    public function testFindTemplatesByName(): void
+    {
+        $result = $this->tools->findTemplates('name=basic-page');
+
+        $this->assertTrue($result['success']);
+        $this->assertEquals(1, $result['data']['count']);
+        $this->assertEquals('basic-page', $result['data']['templates'][0]['name']);
+    }
+
+    public function testFindTemplatesByNameContains(): void
+    {
+        $result = $this->tools->findTemplates('name%=basic');
+
+        $this->assertTrue($result['success']);
+        $this->assertGreaterThan(0, $result['data']['count']);
+    }
+
+    public function testFindTemplatesNoResults(): void
+    {
+        $result = $this->tools->findTemplates('name=zzz_nonexistent_template_xyz');
+
+        $this->assertTrue($result['success']);
+        $this->assertEquals(0, $result['data']['count']);
+    }
+
+    public function testFindTemplatesWithLimit(): void
+    {
+        $result = $this->tools->findTemplates('sort=name, limit=2');
+
+        $this->assertTrue($result['success']);
+        $this->assertLessThanOrEqual(2, $result['data']['count']);
+    }
+
+    public function testFindTemplatesSystemFlag(): void
+    {
+        $result = $this->tools->findTemplates('name=admin');
+
+        $this->assertTrue($result['success']);
+        if ($result['data']['count'] > 0) {
+            $this->assertTrue($result['data']['templates'][0]['is_system']);
+        }
+    }
+
     public function testListTemplates(): void
     {
         $result = $this->tools->listTemplates();

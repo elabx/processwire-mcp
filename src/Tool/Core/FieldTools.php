@@ -25,6 +25,80 @@ class FieldTools extends ProcessWireMcpTool
     }
 
     /**
+     * Find fields using ProcessWire selector syntax
+     *
+     * @param string $selector ProcessWire selector string
+     * @return array Matching fields
+     */
+    #[McpTool(
+        name: 'find_fields',
+        description: <<<'DESC'
+Find fields using ProcessWire selector syntax. Supports these selectors:
+- name=field_name (exact match)
+- name%=partial (contains)
+- name^=starts (starts with)
+- name$=ends (ends with)
+- label%=partial (label contains)
+- type=FieldtypeText (by field type class)
+- type=text (shorthand, auto-prepends "Fieldtype")
+- tags=tag_name (by tag)
+- flags=system (system fields only)
+- flags=0 (non-system fields)
+- sort=name (sort by name, -name for reverse)
+- limit=10 (limit results)
+- id=123 (by ID)
+Examples:
+  "name^=body" — fields starting with "body"
+  "type=FieldtypeText" — all text fields
+  "type=text" — same (shorthand)
+  "tags=seo, flags=0" — non-system fields tagged "seo"
+  "name%=image, sort=name" — fields containing "image", sorted by name
+DESC
+    )]
+    public function findFields(string $selector): array
+    {
+        try {
+            // Normalize shorthand type= values: "text" → "FieldtypeText"
+            $selector = preg_replace_callback(
+                '/\btype\s*=\s*(?!Fieldtype)([a-zA-Z]+)/',
+                fn($m) => 'type=Fieldtype' . ucfirst($m[1]),
+                $selector
+            );
+
+            $fields = $this->fields()->find($selector);
+            $results = [];
+
+            foreach ($fields as $field) {
+                $templateCount = 0;
+                foreach ($this->templates() as $template) {
+                    if ($template->fieldgroup->hasField($field)) {
+                        $templateCount++;
+                    }
+                }
+
+                $results[] = [
+                    'id' => $field->id,
+                    'name' => $field->name,
+                    'label' => $field->label ?: $field->name,
+                    'type' => $field->type->className(),
+                    'tags' => $field->tags,
+                    'is_system' => (bool) ($field->flags & \ProcessWire\Field::flagSystem),
+                    'template_count' => $templateCount,
+                ];
+            }
+
+            return $this->success([
+                'count' => count($results),
+                'selector' => $selector,
+                'fields' => $results,
+            ]);
+
+        } catch (\Throwable $e) {
+            return $this->error('Failed to find fields: ' . $e->getMessage());
+        }
+    }
+
+    /**
      * List all fields
      *
      * @param bool $includeSystem Whether to include system fields
@@ -334,16 +408,77 @@ class FieldTools extends ProcessWireMcpTool
 
             $this->fields()->save($field);
 
-            return $this->success([
+            // Initialize Repeater template and fieldgroup if repeaterFields specified
+            $repeaterInfo = null;
+            if ($field->type instanceof \ProcessWire\FieldtypeRepeater && !empty($settings['repeaterFields'])) {
+                $repeaterInfo = $this->initRepeaterField($field, $settings['repeaterFields']);
+            }
+
+            $result = [
                 'id' => $field->id,
                 'name' => $field->name,
                 'type' => $field->type->className(),
                 'label' => $field->label ?: $field->name,
-            ]);
+            ];
+
+            if ($repeaterInfo) {
+                $result['repeater'] = $repeaterInfo;
+            }
+
+            return $this->success($result);
 
         } catch (\Throwable $e) {
             return $this->error('Failed to create field: ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Initialize a Repeater field's internal template and fieldgroup.
+     *
+     * ProcessWire's FieldtypeRepeater creates a hidden template (repeater_{fieldname})
+     * and adds the specified fields to its fieldgroup. This must be triggered explicitly
+     * via getRepeaterTemplate() — a plain Fields::save() does not do it.
+     *
+     * @param \ProcessWire\Field $field The repeater field
+     * @param array $fieldIds Array of field IDs or names to add to the repeater
+     * @return array Info about the created template and added fields
+     */
+    private function initRepeaterField(\ProcessWire\Field $field, array $fieldIds): array
+    {
+        $info = ['fields_added' => [], 'fields_skipped' => []];
+
+        // Create the repeater template (repeater_{fieldname}) if it doesn't exist
+        $template = $field->type->getRepeaterTemplate($field);
+        if (!$template) {
+            $info['error'] = 'Failed to create repeater template';
+            return $info;
+        }
+        $info['template'] = $template->name;
+
+        // Create the repeater parent page (/processwire/repeaters/for-field-{id}/)
+        $parent = $field->type->getRepeaterParent($field);
+        if ($parent) {
+            $info['parent_id'] = $parent->id;
+        }
+
+        // Add fields to the repeater template's fieldgroup
+        $fieldgroup = $template->fieldgroup;
+        foreach ($fieldIds as $rfId) {
+            $rf = $this->fields()->get($rfId);
+            if ($rf && !$fieldgroup->hasField($rf)) {
+                $fieldgroup->add($rf);
+                $info['fields_added'][] = $rf->name;
+            } elseif (!$rf) {
+                $info['fields_skipped'][] = $rfId;
+            }
+        }
+
+        $fieldgroup->save();
+
+        // Re-save the field so PW stores the repeaterFields mapping
+        $this->fields()->save($field);
+
+        return $info;
     }
 
     /**
@@ -429,7 +564,13 @@ class FieldTools extends ProcessWireMcpTool
 
             $this->fields()->save($fieldObj);
 
-            return $this->success([
+            // Initialize/update Repeater fieldgroup if repeaterFields specified
+            $repeaterInfo = null;
+            if ($fieldObj->type instanceof \ProcessWire\FieldtypeRepeater && !empty($settings['repeaterFields'])) {
+                $repeaterInfo = $this->initRepeaterField($fieldObj, $settings['repeaterFields']);
+            }
+
+            $result = [
                 'id' => $fieldObj->id,
                 'name' => $fieldObj->name,
                 'type' => $fieldObj->type->className(),
@@ -437,7 +578,13 @@ class FieldTools extends ProcessWireMcpTool
                 'description' => $fieldObj->description,
                 'required' => (bool) $fieldObj->required,
                 'tags' => $fieldObj->tags,
-            ]);
+            ];
+
+            if ($repeaterInfo) {
+                $result['repeater'] = $repeaterInfo;
+            }
+
+            return $this->success($result);
 
         } catch (\Throwable $e) {
             return $this->error('Failed to update field: ' . $e->getMessage());
