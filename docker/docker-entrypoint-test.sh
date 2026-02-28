@@ -51,7 +51,7 @@ EOF
 
 # Step 3: Install dependencies
 echo "[3/4] Running composer install..."
-COMPOSER_ALLOW_SUPERUSER=1 composer install --no-interaction --prefer-dist \
+COMPOSER_ALLOW_SUPERUSER=1 composer install --no-interaction --prefer-dist --quiet \
     --working-dir=/var/www/html
 
 # Step 4: Run PHPUnit
@@ -64,8 +64,10 @@ set +e
     "$@" 2>&1 | tee /tmp/phpunit-output.txt
 set -e
 
-# PHPUnit prints "OK (...)" on success — trust that over the PHP exit code
-if grep -q "^OK " /tmp/phpunit-output.txt; then
+# PHPUnit prints "OK (...)" on success — trust that over the PHP exit code.
+# Strip ANSI color codes first since phpunit.xml has colors="true" which
+# adds escape sequences even when output is piped (e.g., \e[30;42mOK...).
+if sed 's/\x1b\[[0-9;]*m//g' /tmp/phpunit-output.txt | grep -q "^OK "; then
     exit 0
 fi
 exit 1

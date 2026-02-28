@@ -96,6 +96,7 @@ For non-DDEV setups:
 
 | Tool | Description |
 |------|-------------|
+| `find_templates` | Find templates using ProcessWire selector syntax |
 | `list_templates` | List all available templates |
 | `get_template_fields` | Get template fields and configuration |
 | `get_template_file` | Get template file path |
@@ -110,6 +111,7 @@ For non-DDEV setups:
 
 | Tool | Description |
 |------|-------------|
+| `find_fields` | Find fields using ProcessWire selector syntax |
 | `list_fields` | List all fields, optionally filter by type |
 | `get_field` | Get field details and configuration |
 | `list_field_types` | List available field types |
@@ -300,8 +302,11 @@ The Docker setup provisions a fresh ProcessWire install and runs the full test s
 # Run all tests
 docker compose -f docker-compose.test.yml run --rm tests
 
-# Run a specific test class
+# Run a specific test class (use --filter, not file paths)
 docker compose -f docker-compose.test.yml run --rm tests --filter=PageToolsTest
+
+# Run multiple test classes
+docker compose -f docker-compose.test.yml run --rm tests --filter='FieldToolsTest|TemplateToolsTest'
 
 # Run with verbose output
 docker compose -f docker-compose.test.yml run --rm tests --testdox
@@ -312,6 +317,8 @@ docker compose -f docker-compose.test.yml down --volumes
 # Rebuild after Dockerfile changes
 docker compose -f docker-compose.test.yml build --no-cache tests
 ```
+
+> **Note:** Use `--filter` to select tests, not file paths. Passing paths like `tests/Tool/PageToolsTest.php` will fail with "Test file not found" because the package is symlinked inside the container at a different location (`/package` via Composer path repo) than the PHPUnit working directory (`/var/www/html`).
 
 ### DDEV
 
