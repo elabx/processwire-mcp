@@ -52,47 +52,45 @@ class RepeaterMatrixTools extends ProcessWireMcpTool
                 );
             }
 
-            $typesInfo = $field->type->getMatrixTypesInfo($field);
-            $types = [];
+            // Use the native getMatrixTypesInfo() API
+            // Works on both Field (RepeaterMatrixField) and Fieldtype objects
+            $matrixInfo = $field->type->getMatrixTypesInfo($field, ['index' => 'type']);
 
-            foreach ($typesInfo as $typeName => $info) {
+            $types = [];
+            foreach ($matrixInfo as $typeName => $info) {
                 $typeData = [
-                    'n' => $info['type'] ?? 0,
-                    'name' => $info['name'] ?? $typeName,
+                    'n' => $info['n'] ?? 0,
+                    'name' => $info['name'],
                     'label' => $info['label'] ?? '',
                     'sort' => $info['sort'] ?? 0,
                     'head' => $info['head'] ?? '',
                     'fields' => [],
                 ];
 
-                // Get fields for this matrix type
-                // $info['fields'] is array<string, Field> (name => Field object)
-                if (!empty($info['fields'])) {
-                    foreach ($info['fields'] as $fName => $f) {
-                        if (!$f || !($f instanceof \ProcessWire\Field)) continue;
+                // Resolve fields from the info array
+                $fields = $info['fields'] ?? [];
+                foreach ($fields as $fName => $f) {
+                    $fieldData = [
+                        'name' => $f->name,
+                        'label' => $f->label ?: $f->name,
+                        'type' => $f->type->className(),
+                    ];
 
-                        $fieldData = [
-                            'name' => $f->name,
-                            'label' => $f->label ?: $f->name,
-                            'type' => $f->type->className(),
-                        ];
-
-                        // Include options for FieldtypeOptions fields
-                        if ($f->type instanceof \ProcessWire\FieldtypeOptions) {
-                            $options = [];
-                            $mgr = $f->type->getOptions($f);
-                            foreach ($mgr as $opt) {
-                                $options[] = [
-                                    'id' => $opt->id,
-                                    'value' => $opt->value,
-                                    'title' => $opt->title,
-                                ];
-                            }
-                            $fieldData['options'] = $options;
+                    // Include options for FieldtypeOptions fields
+                    if ($f->type instanceof \ProcessWire\FieldtypeOptions) {
+                        $options = [];
+                        $mgr = $f->type->getOptions($f);
+                        foreach ($mgr as $opt) {
+                            $options[] = [
+                                'id' => $opt->id,
+                                'value' => $opt->value,
+                                'title' => $opt->title,
+                            ];
                         }
-
-                        $typeData['fields'][] = $fieldData;
+                        $fieldData['options'] = $options;
                     }
+
+                    $typeData['fields'][] = $fieldData;
                 }
 
                 $types[] = $typeData;
@@ -232,7 +230,23 @@ class RepeaterMatrixTools extends ProcessWireMcpTool
             }
 
             $items = $pageObj->getUnformatted($fieldName);
-            $newItem = $items->getNewItem();
+
+            if (!$items) {
+                // Trigger field initialization by saving the page with the field
+                $pageObj->save($fieldName);
+                $items = $pageObj->getUnformatted($fieldName);
+            }
+
+            $newItem = $items ? $items->getNewItem() : null;
+
+            if (!$newItem) {
+                return $this->error(
+                    "Could not create new matrix item. The repeater field structure may not be initialized. "
+                    . "Try saving the page in the admin first, or ensure the field is properly added to the template.",
+                    'INTERNAL_ERROR'
+                );
+            }
+
             $newItem->setMatrixType($matrixType);
 
             // Set field values — use set() directly without hasField() check,
@@ -524,11 +538,19 @@ class RepeaterMatrixTools extends ProcessWireMcpTool
                 $changes[] = 'head';
             }
 
-            // Get current field IDs
-            $currentFieldIds = array_filter(
-                array_map('intval', explode(',', $data["matrix{$n}_fields"] ?? '')),
-                fn($id) => $id > 0
-            );
+            // Get current field IDs (value may be array or comma-separated string)
+            $rawFields = $data["matrix{$n}_fields"] ?? [];
+            if (is_string($rawFields)) {
+                $currentFieldIds = array_filter(
+                    array_map('intval', explode(',', $rawFields)),
+                    fn($id) => $id > 0
+                );
+            } else {
+                $currentFieldIds = array_filter(
+                    array_map('intval', (array) $rawFields),
+                    fn($id) => $id > 0
+                );
+            }
 
             // Add fields
             $addedFields = [];
@@ -733,6 +755,225 @@ class RepeaterMatrixTools extends ProcessWireMcpTool
             return $this->error($e->getMessage(), 'ACCESS_DENIED');
         } catch (\Throwable $e) {
             return $this->error('Failed to delete matrix item: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Reorder matrix items on a page
+     *
+     * @param int|string $page Page ID or path
+     * @param string $fieldName RepeaterMatrix field name
+     * @param array $itemIds Ordered array of item page IDs representing the desired sort order
+     * @return array Reorder result
+     */
+    #[McpTool(
+        name: 'sort_matrix_items',
+        description: 'Reorder RepeaterMatrix items on a page. Provide an array of item IDs in the desired sort order.'
+    )]
+    public function sortMatrixItems(
+        int|string $page,
+        string $fieldName,
+        #[Schema(type: 'array', description: 'Array of item page IDs in desired sort order')]
+        array $itemIds
+    ): array {
+        try {
+            $pageObj = $this->pages()->get($page);
+
+            if (!$pageObj || $pageObj instanceof NullPage || !$pageObj->id) {
+                return $this->error("Page not found: {$page}", 'NOT_FOUND');
+            }
+
+            $this->assertNotAdminPage($pageObj);
+
+            $field = $this->fields()->get($fieldName);
+            if (!$field) {
+                return $this->error("Field not found: {$fieldName}", 'NOT_FOUND');
+            }
+
+            if ($field->type->className() !== 'FieldtypeRepeaterMatrix') {
+                return $this->error(
+                    "Field '{$fieldName}' is not a RepeaterMatrix field.",
+                    'INVALID_INPUT'
+                );
+            }
+
+            $items = $pageObj->getUnformatted($fieldName);
+
+            // Validate all provided IDs belong to this field
+            $existingIds = [];
+            foreach ($items as $item) {
+                $existingIds[] = $item->id;
+            }
+
+            $invalidIds = array_diff(array_map('intval', $itemIds), $existingIds);
+            if (!empty($invalidIds)) {
+                return $this->error(
+                    'Item IDs not found in this field: ' . implode(', ', $invalidIds),
+                    'NOT_FOUND'
+                );
+            }
+
+            // Set sort values using wire('pages')->sort()
+            $sorted = [];
+            foreach ($itemIds as $sortIndex => $id) {
+                $id = (int) $id;
+                $this->wire()->pages->sort($this->pages()->get($id), $sortIndex);
+                $sorted[] = $id;
+            }
+
+            // Save the field to persist sort order
+            $pageObj->save($fieldName);
+
+            return $this->success([
+                'page_id' => $pageObj->id,
+                'field' => $fieldName,
+                'sorted_ids' => $sorted,
+                'count' => count($sorted),
+            ], 'Matrix items reordered');
+
+        } catch (\InvalidArgumentException $e) {
+            return $this->error($e->getMessage(), 'ACCESS_DENIED');
+        } catch (\Throwable $e) {
+            return $this->error('Failed to sort matrix items: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Reorder fields within a RepeaterMatrix type.
+     *
+     * Controls the order of fields in the admin UI for a specific matrix type.
+     * This sets the matrix{N}_fields ID array on the RepeaterMatrix field.
+     * Fields listed in fieldOrder are placed first; unlisted fields are appended at the end.
+     *
+     * @param string $fieldName RepeaterMatrix field name
+     * @param string $matrixTypeName Matrix type name
+     * @param array $fieldOrder Array of field names in desired order
+     * @return array Reorder result with final field order
+     */
+    #[McpTool(
+        name: 'reorder_matrix_type_fields',
+        description: <<<'DESC'
+Reorder fields within a RepeaterMatrix type definition.
+Controls field order in the admin UI for a specific matrix type by rewriting the matrix{N}_fields ID array.
+Fields listed in fieldOrder are placed first in that order. Unlisted fields are appended at the end.
+Fieldset open/close fields must be positioned correctly to wrap the fields they group.
+Example: reorder_matrix_type_fields(fieldName: "content", matrixTypeName: "panel", fieldOrder: ["body", "section_images", "panel_style_fieldset", "panel_background_color", "panel_inverted", "panel_style_fieldset_END"])
+DESC
+    )]
+    public function reorderMatrixTypeFields(
+        string $fieldName,
+        string $matrixTypeName,
+        #[Schema(type: 'array', description: 'Array of field names in desired order. Unlisted fields are appended at the end.')]
+        array $fieldOrder
+    ): array {
+        try {
+            $field = $this->fields()->get($fieldName);
+            if (!$field) {
+                return $this->error("Field not found: {$fieldName}", 'NOT_FOUND');
+            }
+
+            if ($field->type->className() !== 'FieldtypeRepeaterMatrix') {
+                return $this->error(
+                    "Field '{$fieldName}' is {$field->type->className()}, not FieldtypeRepeaterMatrix.",
+                    'INVALID_INPUT'
+                );
+            }
+
+            // Find the type number
+            $data = $field->getArray();
+            $n = null;
+            for ($i = 0; $i <= 100; $i++) {
+                if (isset($data["matrix{$i}_name"]) && $data["matrix{$i}_name"] === $matrixTypeName) {
+                    $n = $i;
+                    break;
+                }
+            }
+
+            if ($n === null) {
+                return $this->error(
+                    "Matrix type '{$matrixTypeName}' not found on field '{$fieldName}'.",
+                    'NOT_FOUND'
+                );
+            }
+
+            // Get current field IDs (may be array or comma-separated string)
+            $rawFields = $data["matrix{$n}_fields"] ?? [];
+            if (is_string($rawFields)) {
+                $currentFieldIds = array_filter(
+                    array_map('intval', explode(',', $rawFields)),
+                    fn($id) => $id > 0
+                );
+            } else {
+                $currentFieldIds = array_filter(
+                    array_map('intval', (array) $rawFields),
+                    fn($id) => $id > 0
+                );
+            }
+
+            // Map current IDs to names
+            $currentFieldNames = [];
+            $idByName = [];
+            foreach ($currentFieldIds as $fId) {
+                $f = $this->fields()->get($fId);
+                if ($f) {
+                    $currentFieldNames[] = $f->name;
+                    $idByName[$f->name] = $f->id;
+                }
+            }
+
+            // Validate requested fields exist in this matrix type
+            $notFound = array_diff($fieldOrder, $currentFieldNames);
+            if (!empty($notFound)) {
+                return $this->error(
+                    'Fields not in matrix type: ' . implode(', ', $notFound),
+                    'NOT_FOUND'
+                );
+            }
+
+            // Build final order: requested fields first, then remaining in current order
+            $remaining = array_diff($currentFieldNames, $fieldOrder);
+            $finalOrder = array_merge($fieldOrder, $remaining);
+
+            // Convert back to IDs
+            $newFieldIds = [];
+            foreach ($finalOrder as $fName) {
+                if (isset($idByName[$fName])) {
+                    $newFieldIds[] = $idByName[$fName];
+                }
+            }
+
+            // 1. Set the field ID array in desired order on the matrix type
+            $field->set("matrix{$n}_fields", $newFieldIds);
+
+            // 2. Set sort values in the repeater template's fieldgroup context
+            // Both matrix{N}_fields AND fieldgroup context sort must agree
+            // for the admin UI to respect the order
+            $repeaterTemplate = $field->type->getMatrixTemplate($field, $n);
+            if ($repeaterTemplate) {
+                $fieldgroup = $repeaterTemplate->fieldgroup;
+                $sort = 0;
+                foreach ($finalOrder as $fName) {
+                    if (isset($idByName[$fName])) {
+                        $fieldgroup->setFieldContextArray($idByName[$fName], ['sort' => $sort]);
+                        $sort++;
+                    }
+                }
+                $fieldgroup->saveContext();
+                $fieldgroup->save();
+            }
+
+            // 3. Save the field
+            $this->fields()->save($field);
+
+            return $this->success([
+                'field' => $fieldName,
+                'matrix_type' => $matrixTypeName,
+                'field_order' => $finalOrder,
+                'count' => count($finalOrder),
+            ], "Fields reordered in matrix type '{$matrixTypeName}'");
+
+        } catch (\Throwable $e) {
+            return $this->error('Failed to reorder matrix type fields: ' . $e->getMessage());
         }
     }
 }

@@ -643,6 +643,95 @@ DESC
     }
 
     /**
+     * Set options on a FieldtypeOptions field
+     *
+     * @param string $field Field name
+     * @param array $options Array of options, each with 'value' and optional 'title'
+     * @param bool $replace If true, replaces all existing options. If false, appends.
+     * @return array Updated options
+     */
+    #[McpTool(
+        name: 'set_field_options',
+        description: <<<'DESC'
+Set the selectable options on a FieldtypeOptions field.
+Each option should have a 'value' (machine name) and optional 'title' (display label).
+Optionally include 'id' to update an existing option by its numeric ID.
+If title is omitted, value is used as the title.
+
+Behavior of removeExisting:
+- false (default): Options with 'id' update existing entries. Options without 'id' are appended as new.
+  This is a merge/upsert — existing options not mentioned are kept unchanged.
+- true: All existing options are removed first, then the provided options are set.
+
+Examples:
+  [{"value": "dark", "title": "Dark Theme"}, {"value": "light", "title": "Light Theme"}]
+  [{"id": 1, "value": "text-left", "title": "Text Left"}]  — updates option 1, keeps others
+DESC
+    )]
+    public function setFieldOptions(
+        string $field,
+        #[Schema(type: 'array', description: 'Array of option objects with value, optional title, and optional id')]
+        array $options,
+        bool $removeExisting = false
+    ): array {
+        try {
+            $fieldObj = $this->fields()->get($field);
+            if (!$fieldObj) {
+                return $this->error("Field not found: {$field}", 'NOT_FOUND');
+            }
+
+            if (!($fieldObj->type instanceof \ProcessWire\FieldtypeOptions)) {
+                return $this->error(
+                    "Field '{$field}' is {$fieldObj->type->className()}, not FieldtypeOptions.",
+                    'INVALID_INPUT'
+                );
+            }
+
+            // Build options string in PW format: "id=value|title" per line
+            $lines = [];
+            foreach ($options as $opt) {
+                $value = is_array($opt) ? ($opt['value'] ?? '') : (string) $opt;
+                $title = is_array($opt) ? ($opt['title'] ?? $value) : $value;
+                $id = is_array($opt) ? ($opt['id'] ?? null) : null;
+                if (empty($value)) continue;
+                $line = $id !== null ? "{$id}={$value}|{$title}" : "{$value}|{$title}";
+                $lines[] = $line;
+            }
+
+            if (empty($lines)) {
+                return $this->error('No valid options provided.', 'INVALID_INPUT');
+            }
+
+            $optionsString = implode("\n", $lines);
+
+            // Use SelectableOptionManager to set options
+            $mgr = new \ProcessWire\SelectableOptionManager();
+            $this->wire->wire($mgr);
+            $mgr->setOptionsString($fieldObj, $optionsString, $removeExisting);
+            $fieldObj->save();
+
+            // Read back the options
+            $resultOptions = [];
+            foreach ($mgr->getOptions($fieldObj) as $opt) {
+                $resultOptions[] = [
+                    'id' => $opt->id,
+                    'value' => $opt->value,
+                    'title' => $opt->title,
+                ];
+            }
+
+            return $this->success([
+                'field' => $fieldObj->name,
+                'option_count' => count($resultOptions),
+                'options' => $resultOptions,
+            ], $removeExisting ? 'Options replaced' : 'Options merged');
+
+        } catch (\Throwable $e) {
+            return $this->error('Failed to set field options: ' . $e->getMessage());
+        }
+    }
+
+    /**
      * Clone an existing field
      *
      * @param string $field Source field name or ID
@@ -684,6 +773,81 @@ DESC
 
         } catch (\Throwable $e) {
             return $this->error('Failed to clone field: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Reorder fields within a template's fieldgroup.
+     *
+     * Fields listed in fieldOrder are placed first in that order.
+     * Fields not listed are appended at the end in their current order.
+     * Works for any template including repeater templates.
+     *
+     * @param string $templateName Template name
+     * @param array $fieldOrder Array of field names in desired order
+     * @return array Reorder result with final field order
+     */
+    #[McpTool(
+        name: 'reorder_template_fields',
+        description: <<<'DESC'
+Reorder fields within a template's fieldgroup.
+Fields listed in fieldOrder are placed first in that order. Fields not listed are appended at the end.
+Works for any template including repeater templates.
+Example: reorder_template_fields(templateName: "basic-page", fieldOrder: ["title", "body", "images"])
+DESC
+    )]
+    public function reorderTemplateFields(
+        string $templateName,
+        #[Schema(type: 'array', description: 'Array of field names in desired order. Unlisted fields are appended at the end.')]
+        array $fieldOrder
+    ): array {
+        try {
+            $template = $this->templates()->get($templateName);
+            if (!$template) {
+                return $this->error("Template not found: {$templateName}", 'NOT_FOUND');
+            }
+
+            $fieldgroup = $template->fieldgroup;
+
+            // Get current field names in order
+            $currentFields = [];
+            foreach ($fieldgroup as $f) {
+                $currentFields[] = $f->name;
+            }
+
+            // Validate requested fields exist in the fieldgroup
+            $notFound = array_diff($fieldOrder, $currentFields);
+            if (!empty($notFound)) {
+                return $this->error(
+                    'Fields not in template: ' . implode(', ', $notFound),
+                    'NOT_FOUND'
+                );
+            }
+
+            // Build final order: requested fields first, then remaining in current order
+            $remaining = array_diff($currentFields, $fieldOrder);
+            $finalOrder = array_merge($fieldOrder, $remaining);
+
+            // Apply sort values
+            $sort = 0;
+            foreach ($finalOrder as $fName) {
+                $f = $this->fields()->get($fName);
+                if ($f) {
+                    $fieldgroup->setFieldSort($f, $sort);
+                    $sort++;
+                }
+            }
+
+            $fieldgroup->save();
+
+            return $this->success([
+                'template' => $templateName,
+                'field_order' => $finalOrder,
+                'count' => count($finalOrder),
+            ], "Fields reordered in template '{$templateName}'");
+
+        } catch (\Throwable $e) {
+            return $this->error('Failed to reorder fields: ' . $e->getMessage());
         }
     }
 }
