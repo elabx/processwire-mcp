@@ -153,12 +153,32 @@ class ModuleTools extends ProcessWireMcpTool
 
             $info = $this->modules()->getModuleInfoVerbose($className);
 
-            return $this->success([
+            // Check if dependent modules from the 'installs' array were actually installed
+            $installs = $info['installs'] ?? [];
+            $failedDeps = [];
+            foreach ($installs as $depClass) {
+                if (!$this->modules()->isInstalled($depClass)) {
+                    $failedDeps[] = $depClass;
+                }
+            }
+
+            $result = [
                 'className' => $className,
                 'title' => $info['title'] ?? '',
                 'version' => $info['version'] ?? 0,
                 'message' => "Module '{$className}' installed successfully.",
-            ]);
+            ];
+
+            if (!empty($failedDeps)) {
+                $result['warnings'] = [
+                    'failedDependencies' => $failedDeps,
+                    'message' => 'The following dependent modules failed to install (ProcessWire catches these errors silently): '
+                        . implode(', ', $failedDeps)
+                        . '. Try installing them individually for detailed error output.',
+                ];
+            }
+
+            return $this->success($result);
 
         } catch (\Throwable $e) {
             return $this->error('Failed to install module: ' . $e->getMessage());
