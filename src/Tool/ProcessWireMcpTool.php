@@ -158,6 +158,46 @@ abstract class ProcessWireMcpTool
     }
 
     /**
+     * Prepare a value before setting it on a page.
+     *
+     * Resolves file paths (e.g. /site/templates/images/foo.jpg) to absolute
+     * container paths so ProcessWire's Fieldtype::sanitizeValue() can handle
+     * the rest natively.
+     *
+     * @param string $fieldName The field name
+     * @param mixed $value The raw value from the MCP request
+     * @return mixed The prepared value (may be unchanged)
+     */
+    protected function prepareValue(string $fieldName, mixed $value): mixed
+    {
+        if (!is_array($value)) {
+            return $value;
+        }
+
+        $field = $this->fields()->get($fieldName);
+        if (!$field) {
+            return $value;
+        }
+
+        // Only resolve paths for file/image fields
+        $isFileField = $field->type instanceof \ProcessWire\FieldtypeFile
+            || $field->type instanceof \ProcessWire\FieldtypeImage;
+
+        if (!$isFileField) {
+            return $value;
+        }
+
+        $root = rtrim($this->wire->wire('config')->paths->root, '/');
+
+        return array_map(function ($path) use ($root) {
+            if (is_string($path) && str_starts_with($path, '/site/')) {
+                return $root . $path;
+            }
+            return $path;
+        }, $value);
+    }
+
+    /**
      * Check if a page is in the admin tree
      *
      * @param Page|int $page Page object or ID

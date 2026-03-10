@@ -253,8 +253,11 @@ class RepeaterMatrixTools extends ProcessWireMcpTool
             // as matrix type field mappings may not be in PW's runtime cache
             $set = [];
 
+            // Save first so file fields have a page ID to work with
+            $newItem->save();
+
             foreach ($fieldValues as $fName => $fValue) {
-                $newItem->set($fName, $fValue);
+                $newItem->set($fName, $this->prepareValue($fName, $fValue));
                 $set[] = $fName;
             }
 
@@ -318,7 +321,7 @@ class RepeaterMatrixTools extends ProcessWireMcpTool
             $skipped = [];
 
             foreach ($fieldValues as $fName => $fValue) {
-                $item->set($fName, $fValue);
+                $item->set($fName, $this->prepareValue($fName, $fValue));
                 $updated[] = $fName;
             }
 

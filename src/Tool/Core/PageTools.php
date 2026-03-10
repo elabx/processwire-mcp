@@ -151,14 +151,16 @@ class PageTools extends ProcessWireMcpTool
                 $page->name = $this->sanitizer()->pageName($name);
             }
 
-            // Set additional field values
+            // Set additional field values (save first so file fields have a page ID)
+            $page->save();
+
             foreach ($fieldValues as $fieldName => $value) {
-                if ($page->template->fieldgroup->hasField($fieldName)) {
-                    $page->set($fieldName, $value);
+                if (!$page->template->fieldgroup->hasField($fieldName)) {
+                    continue;
                 }
+                $page->set($fieldName, $this->prepareValue($fieldName, $value));
             }
 
-            // Save the page
             $page->save();
 
             return $this->success(
@@ -245,7 +247,7 @@ class PageTools extends ProcessWireMcpTool
                     continue;
                 }
 
-                $page->set($fieldName, $value);
+                $page->set($fieldName, $this->prepareValue($fieldName, $value));
                 $updated[] = $fieldName;
             }
 
