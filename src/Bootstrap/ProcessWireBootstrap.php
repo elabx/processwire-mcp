@@ -7,12 +7,20 @@ namespace Elabx\ProcessWireMcp\Bootstrap;
 use ProcessWire\ProcessWire;
 
 /**
- * Bootstraps ProcessWire for CLI usage
+ * Bootstraps ProcessWire for CLI usage.
+ *
+ * ProcessWire is booted once via index.php. Re-bootstrapping with
+ * new ProcessWire() is not safe because PW re-includes site/ready.php
+ * (via include, not include_once), causing fatal "Cannot redeclare
+ * function" errors for any bare function declarations in that file.
+ *
+ * Instead, the single instance is kept alive and its in-memory caches
+ * are reset before each MCP call (see WireAwareContainer).
  */
 class ProcessWireBootstrap
 {
     /**
-     * Boot ProcessWire from the given path
+     * Boot ProcessWire from the given path.
      *
      * @param string $path Path to ProcessWire installation root
      * @return ProcessWire The ProcessWire instance
@@ -20,8 +28,8 @@ class ProcessWireBootstrap
      */
     public static function boot(string $path): ProcessWire
     {
-        // Validate the path
-        $indexPath = rtrim($path, '/') . '/index.php';
+        $path = rtrim($path, '/');
+        $indexPath = $path . '/index.php';
 
         if (!file_exists($indexPath)) {
             throw new \RuntimeException(
@@ -30,8 +38,7 @@ class ProcessWireBootstrap
             );
         }
 
-        // Check for site/config.php
-        $configPath = rtrim($path, '/') . '/site/config.php';
+        $configPath = $path . '/site/config.php';
         if (!file_exists($configPath)) {
             throw new \RuntimeException(
                 "ProcessWire config.php not found at: {$configPath}\n" .
@@ -39,25 +46,21 @@ class ProcessWireBootstrap
             );
         }
 
-        // Change to ProcessWire directory
         $originalDir = getcwd();
         chdir($path);
 
-        // Set CLI mode
         if (!defined('PROCESSWIRE_CLI')) {
             define('PROCESSWIRE_CLI', true);
         }
 
-        // Prevent ProcessWire from outputting anything
+        // Buffer output to suppress deprecation notices / stray output
         ob_start();
 
         try {
-            // Include ProcessWire's index.php (creates $wire internally)
             require $indexPath;
 
             ob_end_clean();
 
-            // index.php doesn't return the instance, so retrieve it
             $wire = ProcessWire::getCurrentInstance();
 
             if (!$wire instanceof ProcessWire) {
